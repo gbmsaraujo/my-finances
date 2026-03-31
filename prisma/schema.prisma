@@ -1,0 +1,148 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Necessário para Supabase
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum MemberRole {
+  OWNER
+  MEMBER
+}
+
+enum DebtType {
+  SHARED
+  INDIVIDUAL
+  LOAN
+}
+
+model User {
+  id    String  @id @default(uuid())
+  email String  @unique
+  name  String?
+
+  // Transações que o usuário criou/é dono
+  ownedTransactions Transaction[] @relation("TransactionOwner")
+
+  // Transações que o usuário efetivamente pagou (fluxo de caixa)
+  paidTransactions Transaction[] @relation("TransactionPayer")
+
+  memberships       HouseholdMember[]
+  createdHouseholds Household[]      @relation("HouseholdCreator")
+  sentInvites       HouseholdInvite[] @relation("InviteSender")
+  acceptedInvites   HouseholdInvite[] @relation("InviteAcceptor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Household {
+  id          String   @id @default(uuid())
+  name        String
+  createdById String
+  createdBy   User     @relation("HouseholdCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  members      HouseholdMember[]
+  categories   Category[]
+  transactions Transaction[]
+  invites      HouseholdInvite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+}
+
+model HouseholdMember {
+  id          String    @id @default(uuid())
+  householdId String
+  userId      String
+  role        MemberRole @default(MEMBER)
+  joinedAt    DateTime   @default(now())
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, userId])
+  @@index([userId])
+}
+
+model HouseholdInvite {
+  id             String   @id @default(uuid())
+  householdId    String
+  sentByUserId   String
+  invitedEmail   String?
+  code           String   @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  acceptedByUser String?
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  sentBy    User      @relation("InviteSender", fields: [sentByUserId], references: [id], onDelete: Cascade)
+  acceptedBy User?    @relation("InviteAcceptor", fields: [acceptedByUser], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId, expiresAt])
+}
+
+model Category {
+  id        String        @id @default(uuid())
+  householdId String
+  name      String
+  color     String        @default("#000000") // Para gráficos
+  icon      String? // Nome do ícone (Lucide React)
+  isFixed   Boolean       @default(false)
+  household Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([householdId, name])
+  @@index([householdId])
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  description String
+  amount      Decimal  @db.Decimal(10, 2) // Precisão financeira: 10 dígitos, 2 casas decimais
+
+  date DateTime @default(now())
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  // Relações
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  // Quem registrou a despesa
+  userId String
+  user   User   @relation("TransactionOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Quem pagou a conta (Importante para o cenário "Julinho usou meu cartão")
+  payerId String
+  payer   User   @relation("TransactionPayer", fields: [payerId], references: [id], onDelete: Cascade)
+
+  // Flags de Lógica
+  isShared  Boolean @default(true) // Se true, divide por 2
+  isPrivate Boolean @default(false) // Se true, só o dono vê
+  debtType  DebtType @default(SHARED)
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([householdId, date])
+  @@index([userId, date])
+  @@index([isShared])
+  @@index([categoryId])
+  @@index([payerId])
+}

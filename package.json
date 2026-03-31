@@ -1,0 +1,46 @@
+{
+    "name": "my-finances",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:ui": "vitest --ui",
+        "prisma:generate": "prisma generate",
+        "db:migrate": "prisma migrate dev",
+        "db:seed": "prisma db seed"
+    },
+    "prisma": {
+        "seed": "ts-node --compiler-options {\"module\":\"commonjs\"} prisma/seed.ts"
+    },
+    "dependencies": {
+        "@hookform/resolvers": "^3.10.0",
+        "@prisma/client": "^5.22.0",
+        "@supabase/ssr": "^0.5.2",
+        "@supabase/supabase-js": "^2.49.4",
+        "lucide-react": "^0.476.0",
+        "next": "^14.2.35",
+        "react": "18.3.1",
+        "react-dom": "18.3.1",
+        "react-hook-form": "^7.54.2",
+        "recharts": "^3.8.1",
+        "zod": "^3.24.2"
+    },
+    "devDependencies": {
+        "@types/node": "^22.13.5",
+        "@types/react": "^18.3.18",
+        "@types/react-dom": "^18.3.5",
+        "@vitest/ui": "^3.0.7",
+        "autoprefixer": "^10.4.20",
+        "postcss": "^8.5.3",
+        "prisma": "^5.22.0",
+        "tailwindcss": "^3.4.17",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.7.3",
+        "vitest": "^3.0.7"
+    }
+}

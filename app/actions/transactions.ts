@@ -1,0 +1,426 @@
+"use server";
+
+import { prisma } from "@/lib/prisma";
+import {
+    createTransactionSchema,
+    filterTransactionsSchema,
+    CreateTransactionInput,
+    FilterTransactionsInput,
+} from "@/lib/validations/transaction";
+import { calculateSettlement } from "@/lib/calculations";
+import { Decimal } from "@prisma/client/runtime/library";
+import { requireAuthUser } from "@/lib/auth";
+import { DebtType } from "@/types/transaction";
+
+/**
+ * Resposta padronizada para todas as Server Actions
+ */
+interface ActionResponse<T> {
+    success: boolean;
+    data?: T;
+    error?: string;
+}
+
+async function getCurrentMembership(userId: string) {
+    return prisma.householdMember.findFirst({
+        where: { userId },
+        include: {
+            household: {
+                include: {
+                    members: true
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Cria uma nova transação com validação de regras de negócio.
+ * 
+ * Regras:
+ * - Se isPrivate=true, força isShared=false
+ * - userId é sempre o usuário logado
+ * - Valida que payerId pertence ao casal (no futuro, quando tiver relação de parceria)
+ */
+export async function createTransaction(
+    input: CreateTransactionInput
+): Promise<ActionResponse<{ id: string }>> {
+    try {
+        // 1. Validar input
+        const validatedInput = createTransactionSchema.parse(input);
+
+        // 2. Obter usuário logado
+        const auth = await requireAuthUser();
+        const membership = await getCurrentMembership(auth.userId);
+
+        if (!membership) {
+            return {
+                success: false,
+                error: "Usuário sem space. Conclua onboarding."
+            };
+        }
+
+        const memberIds = membership.household.members.map((member) => member.userId);
+
+        if (!memberIds.includes(validatedInput.payerId)) {
+            return {
+                success: false,
+                error: "Pagador precisa ser membro do mesmo space"
+            };
+        }
+
+        // 3. Aplicar regra de negócio por tipo
+        const isShared =
+            !validatedInput.isPrivate && validatedInput.debtType === "SHARED";
+        const debtType: DebtType = validatedInput.isPrivate
+            ? "INDIVIDUAL"
+            : validatedInput.debtType;
+
+        const category = await prisma.category.findFirst({
+            where: {
+                id: validatedInput.categoryId,
+                householdId: membership.householdId
+            }
+        });
+
+        if (!category) {
+            return {
+                success: false,
+                error: "Categoria inválida para este space"
+            };
+        }
+
+        // 4. Converter amount para Decimal
+        const amountDecimal = new Decimal(validatedInput.amount.toString());
+
+        // 5. Criar transação no banco
+        const transaction = await prisma.transaction.create({
+            data: {
+                householdId: membership.householdId,
+                description: validatedInput.description,
+                amount: amountDecimal,
+                date: validatedInput.date,
+                categoryId: validatedInput.categoryId,
+                userId: auth.userId,
+                payerId: validatedInput.payerId, // Pode ser o próprio ou o parceiro
+                isShared,
+                isPrivate: validatedInput.isPrivate,
+                debtType,
+                note: validatedInput.note,
+            },
+        });
+
+        return {
+            success: true,
+            data: { id: transaction.id },
+        };
+    } catch (error) {
+        console.error("[createTransaction] Error:", error);
+
+        if (error instanceof Error) {
+            if (error.message.includes("unique")) {
+                return {
+                    success: false,
+                    error: "Categoria inválida ou não encontrada",
+                };
+            }
+
+            return {
+                success: false,
+                error: error.message,
+            };
+        }
+
+        return {
+            success: false,
+            error: "Erro ao criar transação",
+        };
+    }
+}
+
+/**
+ * Lista transações do mês com filtros e respeitando privacidade.
+ * 
+ * Regra de privacidade:
+ * - Se isPrivate=true, só o dono pode ver
+ * - Se isPrivate=false, ambos podem ver
+ */
+export async function getTransactions(
+    filters: FilterTransactionsInput
+): Promise<
+    ActionResponse<
+        Array<{
+            id: string;
+            description: string;
+            amount: number;
+            date: Date;
+            categoryId: string;
+            category: { name: string; color: string };
+            userId: string;
+            payerId: string;
+            isShared: boolean;
+            isPrivate: boolean;
+            debtType: DebtType;
+            note?: string | null;
+        }>
+    >
+> {
+    try {
+        // 1. Validar filtros
+        const validatedFilters = filterTransactionsSchema.parse(filters);
+
+        // 2. Obter usuário logado
+        const auth = await requireAuthUser();
+        const membership = await getCurrentMembership(auth.userId);
+
+        if (!membership) {
+            return {
+                success: false,
+                error: "Usuário sem space"
+            };
+        }
+
+        // 3. Definir período do mês
+        const startDate = new Date(validatedFilters.year, validatedFilters.month - 1, 1);
+        const endDate = new Date(validatedFilters.year, validatedFilters.month, 1);
+
+        // 4. Buscar transações com filtro de privacidade
+        const transactions = await prisma.transaction.findMany({
+            where: {
+                date: {
+                    gte: startDate,
+                    lt: endDate,
+                },
+                householdId: membership.householdId,
+                // Privacidade: deve ser pública OR ser do usuário logado
+                OR: [
+                    { isPrivate: false }, // Visível para todos
+                    { userId: auth.userId }, // Ou pertence ao usuário
+                ],
+                // Filtro opcional por categoria
+                ...(validatedFilters.categoryId && {
+                    categoryId: validatedFilters.categoryId,
+                }),
+            },
+            include: {
+                category: {
+                    select: {
+                        name: true,
+                        color: true,
+                    },
+                },
+            },
+            orderBy: {
+                date: "desc",
+            },
+        });
+
+        // 5. Converter Decimal para Number
+        const formattedTransactions = transactions.map((t) => ({
+            id: t.id,
+            description: t.description,
+            amount: typeof t.amount === "number" ? t.amount : t.amount.toNumber(),
+            date: t.date,
+            categoryId: t.categoryId,
+            category: t.category,
+            userId: t.userId,
+            payerId: t.payerId,
+            isShared: t.isShared,
+            isPrivate: t.isPrivate,
+            debtType: t.debtType,
+            note: t.note,
+        }));
+
+        return {
+            success: true,
+            data: formattedTransactions,
+        };
+    } catch (error) {
+        console.error("[getTransactions] Error:", error);
+
+        if (error instanceof Error) {
+            return {
+                success: false,
+                error: error.message,
+            };
+        }
+
+        return {
+            success: false,
+            error: "Erro ao buscar transações",
+        };
+    }
+}
+
+/**
+ * Calcula o saldo do mês (Settlement).
+ * Retorna o quanto um deve para o outro.
+ */
+export async function getMonthlySettlement(
+    month: number,
+    year: number
+): Promise<
+    ActionResponse<{
+        balance: number;
+        description: string;
+        isSettled: boolean;
+    }>
+> {
+    try {
+        // 1. Obter usuário logado
+        const auth = await requireAuthUser();
+        const membership = await getCurrentMembership(auth.userId);
+
+        if (!membership) {
+            return {
+                success: false,
+                error: "Usuário sem space"
+            };
+        }
+
+        // 2. Buscar transações do mês (apenas não-privadas e do usuário)
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 1);
+
+        const transactions = await prisma.transaction.findMany({
+            where: {
+                date: {
+                    gte: startDate,
+                    lt: endDate,
+                },
+                householdId: membership.householdId,
+                OR: [{ isPrivate: false }, { userId: auth.userId }],
+            },
+        });
+
+        // 3. Calcular settlement
+        const balance = calculateSettlement(transactions, auth.userId);
+
+        const isSettled = balance === 0;
+        const description = isSettled
+            ? "Vocês estão quites! 🎉"
+            : balance > 0
+                ? `Seu parceiro deve R$${balance.toFixed(2)} para você`
+                : `Você deve R$${Math.abs(balance).toFixed(2)} para seu parceiro`;
+
+        return {
+            success: true,
+            data: {
+                balance,
+                description,
+                isSettled,
+            },
+        };
+    } catch (error) {
+        console.error("[getMonthlySettlement] Error:", error);
+
+        if (error instanceof Error) {
+            return {
+                success: false,
+                error: error.message,
+            };
+        }
+
+        return {
+            success: false,
+            error: "Erro ao calcular settlement",
+        };
+    }
+}
+
+/**
+ * Calcula o resumo do dashboard para o mês.
+ * Retorna: total gasto por categoria, total por usuário.
+ */
+export async function getDashboardSummary(
+    month: number,
+    year: number
+): Promise<
+    ActionResponse<{
+        totalSpent: number;
+        totalByCategory: Array<{ name: string; total: number; color: string }>;
+    }>
+> {
+    try {
+        // 1. Obter usuário logado
+        const auth = await requireAuthUser();
+        const membership = await getCurrentMembership(auth.userId);
+
+        if (!membership) {
+            return {
+                success: false,
+                error: "Usuário sem space"
+            };
+        }
+
+        // 2. Definir período
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 1);
+
+        // 3. Buscar transações
+        const transactions = await prisma.transaction.findMany({
+            where: {
+                date: {
+                    gte: startDate,
+                    lt: endDate,
+                },
+                householdId: membership.householdId,
+                OR: [{ isPrivate: false }, { userId: auth.userId }],
+            },
+            include: {
+                category: {
+                    select: {
+                        name: true,
+                        color: true,
+                    },
+                },
+            },
+        });
+
+        // 4. Calcular totais
+        let totalSpent = 0;
+        const categoryTotals = new Map<
+            string,
+            { name: string; total: number; color: string }
+        >();
+
+        for (const t of transactions) {
+            const amount = typeof t.amount === "number" ? t.amount : t.amount.toNumber();
+            totalSpent += amount;
+
+            const categoryKey = t.categoryId;
+            if (!categoryTotals.has(categoryKey)) {
+                categoryTotals.set(categoryKey, {
+                    name: t.category.name,
+                    total: 0,
+                    color: t.category.color,
+                });
+            }
+
+            const categoryData = categoryTotals.get(categoryKey)!;
+            categoryData.total += amount;
+        }
+
+        return {
+            success: true,
+            data: {
+                totalSpent: Math.round(totalSpent * 100) / 100,
+                totalByCategory: Array.from(categoryTotals.values()),
+            },
+        };
+    } catch (error) {
+        console.error("[getDashboardSummary] Error:", error);
+
+        if (error instanceof Error) {
+            return {
+                success: false,
+                error: error.message,
+            };
+        }
+
+        return {
+            success: false,
+            error: "Erro ao buscar resumo do dashboard",
+        };
+    }
+}
