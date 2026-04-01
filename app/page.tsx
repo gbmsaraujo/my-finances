@@ -2,7 +2,27 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-export default async function HomePage() {
+type HomePageProps = {
+    searchParams?: Record<string, string | string[] | undefined>;
+};
+
+function getSearchParam(
+    searchParams: HomePageProps['searchParams'],
+    key: string,
+) {
+    const value = searchParams?.[key];
+    return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function HomePage({ searchParams }: HomePageProps) {
+    const code = getSearchParam(searchParams, 'code');
+
+    if (code) {
+        redirect(
+            `/auth/verify?code=${encodeURIComponent(code)}&next=/reset-password`,
+        );
+    }
+
     const supabase = createSupabaseServerClient();
     const { data } = await supabase.auth.getUser();
 
