@@ -99,18 +99,16 @@ export function SettlementCard({
 
 interface SpendingSummaryProps {
     yourSpent: number;
-    partnerSpent: number;
-    partnerName: string;
+    totalSpent: number;
     isLoading?: boolean;
 }
 
 export function SpendingSummary({
     yourSpent,
-    partnerSpent,
-    partnerName,
+    totalSpent,
     isLoading = false,
 }: SpendingSummaryProps) {
-    const total = yourSpent + partnerSpent;
+    const total = totalSpent;
 
     return (
         <div className='grid grid-cols-2 gap-4'>
@@ -119,7 +117,7 @@ export function SpendingSummary({
                 <CardContent className='pt-6'>
                     <div className='text-center space-y-2'>
                         <p className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
-                            Seus Gastos
+                            Seus Gastos Pendentes
                         </p>
                         <p className='text-2xl font-bold text-blue-600 dark:text-blue-400'>
                             R$ {yourSpent.toFixed(2)}
@@ -133,19 +131,19 @@ export function SpendingSummary({
                 </CardContent>
             </Card>
 
-            {/* Gasto do Parceiro */}
+            {/* Gasto Total */}
             <Card className='bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900 dark:to-purple-800 border-purple-200 dark:border-purple-700'>
                 <CardContent className='pt-6'>
                     <div className='text-center space-y-2'>
                         <p className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
-                            Gastos de {partnerName}
+                            Gastos Pendentes
                         </p>
                         <p className='text-2xl font-bold text-purple-600 dark:text-purple-400'>
-                            R$ {partnerSpent.toFixed(2)}
+                            R$ {totalSpent.toFixed(2)}
                         </p>
                         <p className='text-xs text-gray-600 dark:text-gray-400'>
                             {total > 0
-                                ? `${((partnerSpent / total) * 100).toFixed(0)}% do total`
+                                ? `${((yourSpent / total) * 100).toFixed(0)}% é seu`
                                 : '0%'}
                         </p>
                     </div>

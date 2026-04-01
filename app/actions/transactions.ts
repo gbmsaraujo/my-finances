@@ -89,15 +89,6 @@ export async function createTransaction(
             };
         }
 
-        const memberIds = membership.household.members.map((member) => member.userId);
-
-        if (!memberIds.includes(validatedInput.payerId)) {
-            return {
-                success: false,
-                error: "Pagador precisa ser membro do mesmo space"
-            };
-        }
-
         // 3. Aplicar regra de negócio por tipo
         const isShared =
             !validatedInput.isPrivate && validatedInput.debtType === "SHARED";
@@ -117,7 +108,7 @@ export async function createTransaction(
                 date: validatedInput.date,
                 categoryId: validatedInput.categoryId,
                 userId: auth.userId,
-                payerId: validatedInput.payerId, // Pode ser o próprio ou o parceiro
+                payerId: auth.userId, // Defaults to current user; will be changed at settlement time via modal
                 isShared,
                 isPrivate: validatedInput.isPrivate,
                 debtType,
@@ -345,6 +336,95 @@ export async function toggleTransactionPaymentStatus(
 }
 
 /**
+ * Atualiza o status de pagamento e/ou quem pagou a transação
+ */
+export async function updateTransactionStatus(
+    transactionId: string,
+    status: TransactionPaymentStatus,
+    payerId?: string,
+): Promise<ActionResponse<{ id: string; paymentStatus: TransactionPaymentStatus; payerId: string }>> {
+    try {
+        const auth = await requireAuthUser();
+        const transaction = await prisma.transaction.findUnique({
+            where: { id: transactionId },
+            select: {
+                id: true,
+                householdId: true,
+                note: true,
+                payerId: true,
+            },
+        });
+
+        if (!transaction) {
+            return {
+                success: false,
+                error: "Transação não encontrada",
+            };
+        }
+
+        const membership = await prisma.householdMember.findFirst({
+            where: {
+                userId: auth.userId,
+                householdId: transaction.householdId,
+            },
+            select: { householdId: true },
+        });
+
+        if (!membership) {
+            return {
+                success: false,
+                error: "Você não tem acesso a esta transação",
+            };
+        }
+
+        // If payerId is provided, validate that it's a valid household member
+        if (payerId) {
+            const payerMembership = await prisma.householdMember.findFirst({
+                where: {
+                    userId: payerId,
+                    householdId: transaction.householdId,
+                },
+            });
+
+            if (!payerMembership) {
+                return {
+                    success: false,
+                    error: "Pagador inválido para este espaço",
+                };
+            }
+        }
+
+        const { note } = parseTransactionStatus(transaction.note);
+        const finalPayerId = payerId ?? transaction.payerId;
+
+        await prisma.transaction.update({
+            where: { id: transactionId },
+            data: {
+                paymentStatus: status,
+                payerId: finalPayerId,
+                note,
+            },
+        });
+
+        revalidatePath("/dashboard");
+
+        return {
+            success: true,
+            data: {
+                id: transactionId,
+                paymentStatus: status,
+                payerId: finalPayerId,
+            },
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Erro ao atualizar transação",
+        };
+    }
+}
+
+/**
  * Calcula o saldo do mês (Settlement).
  * Retorna o quanto um deve para o outro.
  */
@@ -381,6 +461,7 @@ export async function getMonthlySettlement(
                     lt: endDate,
                 },
                 householdId: membership.householdId,
+                paymentStatus: "PENDING",
                 OR: [{ isPrivate: false }, { userId: auth.userId }],
             },
         });

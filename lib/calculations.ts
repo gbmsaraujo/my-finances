@@ -104,6 +104,16 @@ export function calculateTotalSpentByUser(
 }
 
 /**
+ * Calcula o valor livre do mês com base no salário e despesas pendentes.
+ */
+export function calculateFreeAmount(
+    salaryAmount: number,
+    pendingExpensesAmount: number
+): number {
+    return roundToTwoDec(salaryAmount - pendingExpensesAmount);
+}
+
+/**
  * Retorna detalhes completos do settlement para exibição.
  */
 export interface SettlementDetails {

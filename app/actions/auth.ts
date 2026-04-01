@@ -296,34 +296,34 @@ export async function registerInvitedUserWithPassword(
         const userId = ensuredUser.data.userId;
         const profileName = trimmedName || normalizedEmail.split("@")[0];
 
-        await prisma.$transaction([
-            syncUserProfile({
-                authUserId: userId,
-                email: normalizedEmail,
-                name: profileName,
-            }),
-            prisma.householdMember.upsert({
-                where: {
-                    householdId_userId: {
-                        householdId: invite.householdId,
-                        userId,
-                    }
-                },
-                update: {},
-                create: {
+        await syncUserProfile({
+            authUserId: userId,
+            email: normalizedEmail,
+            name: profileName,
+        });
+
+        await prisma.householdMember.upsert({
+            where: {
+                householdId_userId: {
                     householdId: invite.householdId,
                     userId,
-                    role: "MEMBER",
                 }
-            }),
-            prisma.householdInvite.update({
-                where: { id: invite.id },
-                data: {
-                    acceptedAt: new Date(),
-                    acceptedByUser: userId,
-                }
-            })
-        ]);
+            },
+            update: {},
+            create: {
+                householdId: invite.householdId,
+                userId,
+                role: "MEMBER",
+            }
+        });
+
+        await prisma.householdInvite.update({
+            where: { id: invite.id },
+            data: {
+                acceptedAt: new Date(),
+                acceptedByUser: userId,
+            }
+        });
 
         return {
             success: true,

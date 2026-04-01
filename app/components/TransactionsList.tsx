@@ -17,10 +17,12 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Lock, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Lock, ArrowUpRight, ArrowDownLeft, Loader } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { toggleTransactionPaymentStatus } from '@/app/actions/transactions';
+import { updateTransactionStatus } from '@/app/actions/transactions';
+import { SettlementModal } from './SettlementModal';
 
 interface Transaction {
     id: string;
@@ -48,6 +50,12 @@ interface TransactionsListProps {
     selectedMonth: number;
     selectedYear: number;
     categories: Array<{ id: string; name: string }>;
+    participants: Array<{
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+    }>;
     isLoading?: boolean;
     onCategoryChange?: (categoryId: string) => void;
 }
@@ -59,6 +67,7 @@ export function TransactionsList({
     selectedMonth,
     selectedYear,
     categories,
+    participants,
     isLoading = false,
     onCategoryChange,
 }: TransactionsListProps) {
@@ -73,6 +82,11 @@ export function TransactionsList({
     const [updatingTransactionId, setUpdatingTransactionId] = useState<
         string | null
     >(null);
+    const [
+        selectedTransactionForSettlement,
+        setSelectedTransactionForSettlement,
+    ] = useState<Transaction | null>(null);
+    const [isSettling, setIsSettling] = useState(false);
 
     useEffect(() => {
         setLocalTransactions(transactions);
@@ -122,34 +136,62 @@ export function TransactionsList({
         updateMonthYear(selectedMonth, Number(year));
     };
 
-    const handleToggleStatus = async (transaction: Transaction) => {
-        const nextStatus =
-            transaction.paymentStatus === 'PAID' ? 'PENDING' : 'PAID';
-        setUpdatingTransactionId(transaction.id);
+    const handleToggleStatus = (transaction: Transaction) => {
+        setSelectedTransactionForSettlement(transaction);
+    };
 
-        const result = await toggleTransactionPaymentStatus(
-            transaction.id,
-            nextStatus,
-        );
-        if (!result.success || !result.data) {
-            toast.error(result.error ?? 'Não foi possível atualizar o status');
-            setUpdatingTransactionId(null);
-            return;
+    const handleSettlementConfirm = async (payerId: string) => {
+        if (!selectedTransactionForSettlement) return;
+
+        setIsSettling(true);
+
+        try {
+            const nextStatus =
+                selectedTransactionForSettlement.paymentStatus === 'PAID'
+                    ? 'PENDING'
+                    : 'PAID';
+
+            // Call updateTransactionStatus with both paymentStatus and payerId
+            const result = await updateTransactionStatus(
+                selectedTransactionForSettlement.id,
+                nextStatus,
+                payerId,
+            );
+
+            if (!result.success || !result.data) {
+                toast.error(
+                    result.error ?? 'Não foi possível atualizar o status',
+                );
+                setIsSettling(false);
+                return;
+            }
+
+            // Update local state
+            setLocalTransactions((current) =>
+                current.map((item) =>
+                    item.id === selectedTransactionForSettlement.id
+                        ? {
+                              ...item,
+                              paymentStatus: result.data!.paymentStatus,
+                              payerId: result.data!.payerId,
+                          }
+                        : item,
+                ),
+            );
+
+            toast.success(
+                nextStatus === 'PAID'
+                    ? 'Despesa marcada como paga'
+                    : 'Despesa marcada como pendente',
+            );
+
+            setSelectedTransactionForSettlement(null);
+        } catch (error) {
+            toast.error('Erro ao atualizar despesa');
+            console.error(error);
+        } finally {
+            setIsSettling(false);
         }
-
-        setLocalTransactions((current) =>
-            current.map((item) =>
-                item.id === transaction.id
-                    ? { ...item, paymentStatus: result.data!.paymentStatus }
-                    : item,
-            ),
-        );
-        toast.success(
-            nextStatus === 'PAID'
-                ? 'Despesa marcada como paga'
-                : 'Despesa marcada como pendente',
-        );
-        setUpdatingTransactionId(null);
     };
 
     const filteredTransactions =
@@ -203,132 +245,182 @@ export function TransactionsList({
     }
 
     return (
-        <Card>
-            <CardHeader>
-                <div className='flex flex-col gap-4'>
-                    <div>
-                        <CardTitle>Histórico de Transações</CardTitle>
-                        <CardDescription>Gastos do mês</CardDescription>
-                    </div>
+        <>
+            <Card>
+                <CardHeader>
+                    <div className='flex flex-col gap-4'>
+                        <div>
+                            <CardTitle>Histórico de Transações</CardTitle>
+                            <CardDescription>Gastos do mês</CardDescription>
+                        </div>
 
-                    {/* Filtro de Categoria */}
-                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                        <Select
-                            value={String(selectedMonth)}
-                            onValueChange={handleMonthChange}
-                            disabled={isChangingPeriod}
-                        >
-                            <SelectTrigger className='h-10 text-sm'>
-                                <SelectValue placeholder='Mês' />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {monthOptions.map((month) => (
-                                    <SelectItem
-                                        key={month.value}
-                                        value={String(month.value)}
-                                    >
-                                        {month.label}
+                        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                            <Select
+                                value={String(selectedMonth)}
+                                onValueChange={handleMonthChange}
+                            >
+                                <SelectTrigger
+                                    className='h-10 text-sm'
+                                    disabled={isChangingPeriod}
+                                >
+                                    <SelectValue placeholder='Mês' />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {monthOptions.map((month) => (
+                                        <SelectItem
+                                            key={month.value}
+                                            value={String(month.value)}
+                                        >
+                                            {month.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+
+                            <Select
+                                value={String(selectedYear)}
+                                onValueChange={handleYearChange}
+                            >
+                                <SelectTrigger
+                                    className='h-10 text-sm'
+                                    disabled={isChangingPeriod}
+                                >
+                                    <SelectValue placeholder='Ano' />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {yearOptions.map((year) => (
+                                        <SelectItem
+                                            key={year.value}
+                                            value={String(year.value)}
+                                        >
+                                            {year.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+
+                            <Select
+                                value={selectedCategory}
+                                onValueChange={handleCategoryChange}
+                            >
+                                <SelectTrigger
+                                    className='h-10 text-sm'
+                                    disabled={isChangingPeriod}
+                                >
+                                    <SelectValue placeholder='Todas as categorias' />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value='all'>
+                                        Todas as categorias
                                     </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                                    {categories.map((cat) => (
+                                        <SelectItem key={cat.id} value={cat.id}>
+                                            {cat.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
 
-                        <Select
-                            value={String(selectedYear)}
-                            onValueChange={handleYearChange}
-                            disabled={isChangingPeriod}
-                        >
-                            <SelectTrigger className='h-10 text-sm'>
-                                <SelectValue placeholder='Ano' />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {yearOptions.map((year) => (
-                                    <SelectItem
-                                        key={year.value}
-                                        value={String(year.value)}
-                                    >
-                                        {year.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        <Select
-                            value={selectedCategory}
-                            onValueChange={handleCategoryChange}
-                            disabled={isChangingPeriod}
-                        >
-                            <SelectTrigger className='h-10 text-sm'>
-                                <SelectValue placeholder='Todas as categorias' />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value='all'>
-                                    Todas as categorias
-                                </SelectItem>
-                                {categories.map((cat) => (
-                                    <SelectItem key={cat.id} value={cat.id}>
-                                        {cat.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        <Select
-                            value={selectedStatus}
-                            onValueChange={(
-                                value: 'all' | 'PENDING' | 'PAID',
-                            ) => setSelectedStatus(value)}
-                            disabled={isChangingPeriod}
-                        >
-                            <SelectTrigger className='h-10 text-sm'>
-                                <SelectValue placeholder='Status' />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value='all'>
-                                    Todos os status
-                                </SelectItem>
-                                <SelectItem value='PENDING'>
-                                    Pendentes
-                                </SelectItem>
-                                <SelectItem value='PAID'>Pagas</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    {isChangingPeriod ? (
-                        <p className='text-xs text-slate-500'>
-                            Carregando despesas do período selecionado...
-                        </p>
-                    ) : null}
-                </div>
-            </CardHeader>
-
-            <CardContent>
-                <div className='space-y-3'>
-                    {statusFilteredTransactions.length === 0 ? (
-                        <p className='text-center text-gray-500 dark:text-gray-400 py-4'>
-                            Nenhuma transação para os filtros selecionados
-                        </p>
-                    ) : (
-                        statusFilteredTransactions.map((transaction) => (
-                            <TransactionItem
-                                key={transaction.id}
-                                transaction={transaction}
-                                isYourTransaction={isYourTransaction(
-                                    transaction,
-                                )}
-                                youPaid={youPaid(transaction)}
-                                isUpdating={
-                                    updatingTransactionId === transaction.id
+                            <Select
+                                value={selectedStatus}
+                                onValueChange={(value: string) =>
+                                    setSelectedStatus(
+                                        value as 'all' | 'PENDING' | 'PAID',
+                                    )
                                 }
-                                onToggleStatus={() =>
-                                    handleToggleStatus(transaction)
-                                }
-                            />
-                        ))
-                    )}
-                </div>
-            </CardContent>
-        </Card>
+                            >
+                                <SelectTrigger
+                                    className='h-10 text-sm'
+                                    disabled={isChangingPeriod}
+                                >
+                                    <SelectValue placeholder='Status' />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value='all'>
+                                        Todos os status
+                                    </SelectItem>
+                                    <SelectItem value='PENDING'>
+                                        Pendentes
+                                    </SelectItem>
+                                    <SelectItem value='PAID'>Pagas</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {isChangingPeriod ? (
+                            <div className='flex items-center gap-2 text-xs text-slate-500'>
+                                <Loader className='h-4 w-4 animate-spin' />
+                                <span>
+                                    Carregando despesas do período
+                                    selecionado...
+                                </span>
+                            </div>
+                        ) : null}
+                    </div>
+                </CardHeader>
+
+                <CardContent>
+                    <div className='space-y-3'>
+                        {isChangingPeriod ? (
+                            <div className='space-y-3'>
+                                {[1, 2, 3, 4].map((i) => (
+                                    <div
+                                        key={i}
+                                        className='flex items-center gap-4 p-3 rounded-lg border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900'
+                                    >
+                                        <Skeleton className='w-12 h-12 rounded-lg flex-shrink-0' />
+
+                                        <div className='flex-1 min-w-0 space-y-2'>
+                                            <div className='flex items-start justify-between gap-2'>
+                                                <Skeleton className='h-4 w-32 rounded' />
+                                                <Skeleton className='h-5 w-12 rounded' />
+                                            </div>
+                                            <Skeleton className='h-3 w-40 rounded' />
+                                            <div className='pt-2'>
+                                                <Skeleton className='h-8 w-24 rounded' />
+                                            </div>
+                                        </div>
+
+                                        <Skeleton className='h-6 w-20 rounded flex-shrink-0' />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : statusFilteredTransactions.length === 0 ? (
+                            <p className='text-center text-gray-500 dark:text-gray-400 py-4'>
+                                Nenhuma transação para os filtros selecionados
+                            </p>
+                        ) : (
+                            statusFilteredTransactions.map((transaction) => (
+                                <TransactionItem
+                                    key={transaction.id}
+                                    transaction={transaction}
+                                    isYourTransaction={isYourTransaction(
+                                        transaction,
+                                    )}
+                                    youPaid={youPaid(transaction)}
+                                    isUpdating={
+                                        selectedTransactionForSettlement?.id ===
+                                            transaction.id && isSettling
+                                    }
+                                    onToggleStatus={() =>
+                                        handleToggleStatus(transaction)
+                                    }
+                                />
+                            ))
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
+
+            <SettlementModal
+                isOpen={selectedTransactionForSettlement !== null}
+                transaction={selectedTransactionForSettlement ?? undefined}
+                participants={participants}
+                onCancel={() => setSelectedTransactionForSettlement(null)}
+                onConfirm={handleSettlementConfirm}
+                isLoading={isSettling}
+            />
+        </>
     );
 }
 
@@ -364,7 +456,6 @@ function TransactionItem({
 
     return (
         <div className='flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border border-gray-100 dark:border-gray-700'>
-            {/* Icon/Category */}
             <div
                 className='w-12 h-12 rounded-lg flex items-center justify-center text-lg font-semibold text-white flex-shrink-0'
                 style={{ backgroundColor: transaction.category.color }}
@@ -372,7 +463,6 @@ function TransactionItem({
                 {}
             </div>
 
-            {/* Details */}
             <div className='flex-1 min-w-0'>
                 <div className='flex items-start justify-between gap-2 mb-1'>
                     <div className='min-w-0 flex-1'>
@@ -384,7 +474,6 @@ function TransactionItem({
                         </p>
                     </div>
 
-                    {/* Badges */}
                     <div className='flex gap-1 flex-shrink-0'>
                         <Badge
                             variant={
@@ -419,7 +508,6 @@ function TransactionItem({
                     </div>
                 </div>
 
-                {/* Category */}
                 <p className='text-xs text-gray-600 dark:text-gray-400'>
                     {transaction.category.name} • {debtLabel}
                     {transaction.isShared && ' (50%)'}
@@ -447,7 +535,6 @@ function TransactionItem({
                 </div>
             </div>
 
-            {/* Amount */}
             <div className='text-right flex-shrink-0'>
                 <p
                     className={`text-lg font-bold ${

@@ -8,6 +8,7 @@ import {
     SpendingSummary,
     CategoryBreakdown,
 } from '@/app/components/DashboardCards';
+import { MonthlyIncomeCard } from '@/app/components/MonthlyIncomeCard';
 import { TransactionsList } from '@/app/components/TransactionsList';
 import {
     CategoryDonutChart,
@@ -18,6 +19,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAuthUser } from '@/lib/auth';
 import { getHouseholdContext } from '@/lib/household';
 import { ensureUserHousehold } from '@/app/actions/household';
+import { getMonthlyIncomeSummary } from '@/app/actions/income';
 import { parseTransactionStatus } from '@/lib/transaction-status';
 
 interface DashboardPageProps {
@@ -111,15 +113,33 @@ export default async function DashboardPage({
     const partnerId = householdContext.partner?.id;
     const partnerName = householdContext.partner?.name ?? 'Parceiro(a)';
 
-    const yourSpent = normalizedTransactions
+    const pendingTransactions = normalizedTransactions.filter(
+        (transaction) => transaction.paymentStatus === 'PENDING',
+    );
+
+    const yourSpent = pendingTransactions
         .filter((transaction) => transaction.userId === auth.userId)
         .reduce((sum, transaction) => sum + transaction.amount, 0);
 
     const partnerSpent = partnerId
-        ? normalizedTransactions
+        ? pendingTransactions
               .filter((transaction) => transaction.userId === partnerId)
               .reduce((sum, transaction) => sum + transaction.amount, 0)
         : 0;
+
+    const totalSpent = yourSpent + partnerSpent;
+
+    const monthlyIncomeSummary = await getMonthlyIncomeSummary({
+        householdId: householdContext.householdId,
+        month: selectedMonth,
+        year: selectedYear,
+        pendingExpensesTotal: totalSpent,
+    });
+
+    const salaryMonth = monthlyIncomeSummary.data?.salaryMonth ?? 0;
+    const freeAmount = monthlyIncomeSummary.data?.freeAmount ?? -totalSpent;
+    const hasConfiguredSalary =
+        monthlyIncomeSummary.data?.hasConfiguredSalary ?? false;
 
     const categoryTotals = new Map<
         string,
@@ -238,8 +258,17 @@ export default async function DashboardPage({
 
                 <SpendingSummary
                     yourSpent={yourSpent}
-                    partnerSpent={partnerSpent}
-                    partnerName={partnerName}
+                    totalSpent={totalSpent}
+                />
+
+                <MonthlyIncomeCard
+                    householdId={householdContext.householdId}
+                    month={selectedMonth}
+                    year={selectedYear}
+                    salaryMonth={salaryMonth}
+                    pendingExpensesTotal={totalSpent}
+                    freeAmount={freeAmount}
+                    hasConfiguredSalary={hasConfiguredSalary}
                 />
 
                 <CategoryBreakdown
@@ -262,6 +291,7 @@ export default async function DashboardPage({
                         id: category.id,
                         name: category.name,
                     }))}
+                    participants={householdContext.members}
                 />
 
                 <div className='pt-4 text-center'>

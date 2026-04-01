@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { calculateSettlement, calculateTotalSpentByUser, getSettlementDetails } from "./calculations";
+import {
+    calculateFreeAmount,
+    calculateSettlement,
+    calculateTotalSpentByUser,
+    getSettlementDetails,
+} from "./calculations";
 import { Decimal } from "@prisma/client/runtime/library";
 
 describe("calculateSettlement", () => {
@@ -293,5 +298,19 @@ describe("getSettlementDetails", () => {
         expect(details.isSettled).toBe(false);
         expect(details.description).toContain("João");
         expect(details.description).toContain("75.00");
+    });
+});
+
+describe("calculateFreeAmount", () => {
+    it("deve calcular o valor livre subtraindo despesas pendentes do salário", () => {
+        expect(calculateFreeAmount(5000, 1800)).toBe(3200);
+    });
+
+    it("deve retornar valor negativo quando pendências superam salário", () => {
+        expect(calculateFreeAmount(2000, 2450)).toBe(-450);
+    });
+
+    it("deve manter arredondamento financeiro com duas casas", () => {
+        expect(calculateFreeAmount(1234.56, 234.11)).toBe(1000.45);
     });
 });

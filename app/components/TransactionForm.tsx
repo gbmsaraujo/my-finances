@@ -78,17 +78,6 @@ export function TransactionForm({
     const [newCategoryName, setNewCategoryName] = useState('');
     const [amountInput, setAmountInput] = useState('');
 
-    const payerOptions =
-        participants.length > 0
-            ? participants
-            : [{ id: currentUserId, name: 'Você' }];
-
-    const defaultPayerId =
-        payerOptions.find((participant) => participant.id === currentUserId)
-            ?.id ??
-        payerOptions[0]?.id ??
-        '';
-
     const defaultCategoryId = categories[0]?.id ?? '';
 
     useEffect(() => {
@@ -102,26 +91,11 @@ export function TransactionForm({
             amount: 0,
             date: new Date(),
             categoryId: defaultCategoryId,
-            payerId: defaultPayerId,
             debtType: 'SHARED',
             note: '',
             isPrivate: false,
         },
     });
-
-    useEffect(() => {
-        const selectedPayer = form.getValues('payerId');
-        if (
-            !payerOptions.some(
-                (participant) => participant.id === selectedPayer,
-            )
-        ) {
-            form.setValue('payerId', defaultPayerId, {
-                shouldDirty: false,
-                shouldValidate: true,
-            });
-        }
-    }, [defaultPayerId, form, payerOptions]);
 
     useEffect(() => {
         const selectedCategory = form.getValues('categoryId');
@@ -150,7 +124,6 @@ export function TransactionForm({
                     amount: 0,
                     date: new Date(),
                     categoryId: localCategories[0]?.id ?? '',
-                    payerId: defaultPayerId,
                     debtType: 'SHARED',
                     note: '',
                     isPrivate: false,
@@ -212,7 +185,6 @@ export function TransactionForm({
     const isPrivate = form.watch('isPrivate');
     const debtType = form.watch('debtType');
     const categoryId = form.watch('categoryId');
-    const payerId = form.watch('payerId');
     const selectedCategoryName =
         localCategories.find((category) => category.id === categoryId)?.name ??
         'Selecione uma categoria';
@@ -225,9 +197,6 @@ export function TransactionForm({
         };
     const selectedDebtTypeLabel =
         debtTypeLabelMap[debtType] ?? 'Selecione o tipo';
-    const selectedPayerName =
-        payerOptions.find((participant) => participant.id === payerId)?.name ??
-        'Você';
 
     return (
         <div className='w-full max-w-md mx-auto'>
@@ -460,41 +429,6 @@ export function TransactionForm({
 
                     <FormField
                         control={form.control}
-                        name='payerId'
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className='text-base font-semibold'>
-                                    Quem pagou?
-                                </FormLabel>
-                                <Select
-                                    onValueChange={field.onChange}
-                                    value={field.value}
-                                >
-                                    <FormControl>
-                                        <SelectTrigger className='h-12 text-base rounded-lg'>
-                                            <SelectValue placeholder='Selecione quem pagou'>
-                                                {selectedPayerName}
-                                            </SelectValue>
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        {payerOptions.map((participant) => (
-                                            <SelectItem
-                                                key={participant.id}
-                                                value={participant.id}
-                                            >
-                                                {participant.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    <FormField
-                        control={form.control}
                         name='note'
                         render={({ field }) => (
                             <FormItem>
@@ -560,16 +494,6 @@ export function TransactionForm({
                             <AlertDescription className='text-blue-800 text-sm'>
                                 A despesa será dividida automaticamente entre
                                 vocês.
-                            </AlertDescription>
-                        </Alert>
-                    ) : null}
-
-                    {debtType === 'LOAN' && payerId !== currentUserId ? (
-                        <Alert className='border-amber-500 bg-amber-50'>
-                            <AlertCircle className='h-4 w-4 text-amber-600' />
-                            <AlertDescription className='text-amber-800 text-sm'>
-                                Você está registrando um empréstimo pago por{' '}
-                                {partnerName}.
                             </AlertDescription>
                         </Alert>
                     ) : null}

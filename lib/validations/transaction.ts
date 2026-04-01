@@ -7,7 +7,6 @@ export const createTransactionSchema = z.object({
     amount: z.number().positive("Valor deve ser positivo"),
     date: z.date(),
     categoryId: z.string().uuid("ID da categoria inválido"),
-    payerId: z.string().uuid("ID do pagador inválido"),
     debtType: debtTypeSchema.default("SHARED"),
     note: z.string().max(200, "Observação muito longa").optional(),
     isPrivate: z.boolean().default(false),
