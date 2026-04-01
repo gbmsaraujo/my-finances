@@ -63,6 +63,7 @@ jobs:
             VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
             VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
             VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+            RUN_PROD_SEED: ${{ secrets.RUN_PROD_SEED }}
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -83,7 +84,7 @@ jobs:
               run: npm run db:deploy
 
             - name: Seed production defaults (optional)
-              if: ${{ secrets.RUN_PROD_SEED == 'true' }}
+              if: env.RUN_PROD_SEED == 'true'
               run: npm run db:seed:prod
 
             - name: Pull Vercel environment
