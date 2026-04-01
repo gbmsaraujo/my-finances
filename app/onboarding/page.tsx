@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -9,7 +9,7 @@ import { ensureUserHousehold, createInviteCode } from '@/app/actions/household';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-export default function OnboardingPage() {
+function OnboardingContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const selectedSpaceId = searchParams.get('spaceId') ?? undefined;
@@ -93,5 +93,13 @@ export default function OnboardingPage() {
                 </div>
             </div>
         </main>
+    );
+}
+
+export default function OnboardingPage() {
+    return (
+        <Suspense fallback={null}>
+            <OnboardingContent />
+        </Suspense>
     );
 }
