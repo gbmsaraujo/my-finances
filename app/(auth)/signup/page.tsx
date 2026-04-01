@@ -1,58 +1,83 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { sendSignupOtp, verifyOtp } from '@/app/actions/auth';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
+import { signUpWithPassword } from '@/app/actions/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export default function SignupPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
-    const [otp, setOtp] = useState('');
-    const [step, setStep] = useState<'request' | 'verify'>('request');
-    const [message, setMessage] = useState('');
-    const [error, setError] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [cooldownSeconds, setCooldownSeconds] = useState(0);
 
-    async function handleRequestOtp(e: FormEvent) {
-        e.preventDefault();
-        setLoading(true);
-        setError('');
-        setMessage('');
+    useEffect(() => {
+        const prefilledEmail = searchParams.get('email');
+        if (prefilledEmail && !email) {
+            setEmail(prefilledEmail);
+        }
+    }, [email, searchParams]);
 
-        const result = await sendSignupOtp(email.trim(), name.trim());
-
-        if (!result.success) {
-            setError(result.error ?? 'Não foi possível enviar o código');
-            setLoading(false);
+    useEffect(() => {
+        if (cooldownSeconds <= 0) {
             return;
         }
 
-        setMessage(
-            'Código enviado para seu email. Confira a caixa de entrada.',
-        );
-        setStep('verify');
-        setLoading(false);
-    }
+        const timer = setInterval(() => {
+            setCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+        }, 1000);
 
-    async function handleVerifyOtp(e: FormEvent) {
+        return () => clearInterval(timer);
+    }, [cooldownSeconds]);
+
+    async function handleSignup(e: FormEvent) {
         e.preventDefault();
         setLoading(true);
-        setError('');
 
-        const result = await verifyOtp(email.trim(), otp.trim());
+        try {
+            if (password !== confirmPassword) {
+                toast.error('As senhas não coincidem.');
+                return;
+            }
 
-        if (!result.success) {
-            setError(result.error ?? 'Código inválido');
+            const result = await signUpWithPassword(
+                email.trim(),
+                password,
+                name.trim(),
+            );
+
+            if (!result.success) {
+                toast.error(result.error ?? 'Não foi possível criar conta');
+                if (result.code === 'RATE_LIMITED') {
+                    setCooldownSeconds(result.retryAfterSeconds ?? 60);
+                }
+                return;
+            }
+
+            if (result.data?.emailConfirmationRequired) {
+                toast.success('Conta criada. Confirme seu email e faça login.');
+                router.push('/login');
+                router.refresh();
+                return;
+            }
+
+            toast.success(
+                'Conta criada com sucesso. Faça login para continuar.',
+            );
+            router.push('/login');
+            router.refresh();
+        } catch {
+            toast.error('Falha ao comunicar com o servidor. Tente novamente.');
+        } finally {
             setLoading(false);
-            return;
         }
-
-        router.push('/onboarding');
-        router.refresh();
     }
 
     return (
@@ -62,62 +87,53 @@ export default function SignupPage() {
                     Criar conta
                 </h1>
                 <p className='text-sm text-slate-600'>
-                    Cadastro com validação por código de 6 dígitos.
+                    Crie seu acesso com email e senha.
                 </p>
 
-                {step === 'request' ? (
-                    <form className='space-y-3' onSubmit={handleRequestOtp}>
-                        <Input
-                            required
-                            placeholder='Seu nome'
-                            value={name}
-                            onChange={(event) => setName(event.target.value)}
-                        />
-                        <Input
-                            type='email'
-                            required
-                            placeholder='seuemail@exemplo.com'
-                            value={email}
-                            onChange={(event) => setEmail(event.target.value)}
-                        />
-                        <Button
-                            type='submit'
-                            className='w-full'
-                            disabled={loading}
-                        >
-                            {loading ? 'Enviando...' : 'Enviar código'}
-                        </Button>
-                    </form>
-                ) : (
-                    <form className='space-y-3' onSubmit={handleVerifyOtp}>
-                        <Input
-                            required
-                            placeholder='Código de 6 dígitos'
-                            value={otp}
-                            inputMode='numeric'
-                            maxLength={6}
-                            onChange={(event) =>
-                                setOtp(
-                                    event.target.value
-                                        .replace(/\D/g, '')
-                                        .slice(0, 6),
-                                )
-                            }
-                        />
-                        <Button
-                            type='submit'
-                            className='w-full'
-                            disabled={loading}
-                        >
-                            {loading ? 'Validando...' : 'Finalizar cadastro'}
-                        </Button>
-                    </form>
-                )}
-
-                {message ? (
-                    <p className='text-xs text-emerald-700'>{message}</p>
-                ) : null}
-                {error ? <p className='text-xs text-red-600'>{error}</p> : null}
+                <form className='space-y-3' onSubmit={handleSignup}>
+                    <Input
+                        required
+                        placeholder='Seu nome'
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                    />
+                    <Input
+                        type='email'
+                        required
+                        placeholder='seuemail@exemplo.com'
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                    />
+                    <Input
+                        type='password'
+                        required
+                        minLength={6}
+                        placeholder='Crie uma senha'
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                    />
+                    <Input
+                        type='password'
+                        required
+                        minLength={6}
+                        placeholder='Confirme a senha'
+                        value={confirmPassword}
+                        onChange={(event) =>
+                            setConfirmPassword(event.target.value)
+                        }
+                    />
+                    <Button
+                        type='submit'
+                        className='w-full'
+                        disabled={loading || cooldownSeconds > 0}
+                    >
+                        {loading
+                            ? 'Criando...'
+                            : cooldownSeconds > 0
+                              ? `Tente novamente em ${cooldownSeconds}s`
+                              : 'Criar conta'}
+                    </Button>
+                </form>
 
                 <p className='text-sm text-slate-600'>
                     Já tem conta?{' '}

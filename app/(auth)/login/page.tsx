@@ -3,59 +3,43 @@
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { sendLoginOtp, verifyOtp } from '@/app/actions/auth';
+import { toast } from 'sonner';
+import { signInWithPassword } from '@/app/actions/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export default function LoginPage() {
     const router = useRouter();
     const [email, setEmail] = useState('');
-    const [otp, setOtp] = useState('');
-    const [step, setStep] = useState<'request' | 'verify'>('request');
-    const [message, setMessage] = useState('');
-    const [error, setError] = useState('');
+    const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showSignupCta, setShowSignupCta] = useState(false);
 
-    async function handleRequestOtp(e: FormEvent) {
+    async function handleLogin(e: FormEvent) {
         e.preventDefault();
         setLoading(true);
-        setError('');
-        setMessage('');
+        setShowSignupCta(false);
 
-        const result = await sendLoginOtp(email.trim());
+        try {
+            const result = await signInWithPassword(email.trim(), password);
 
-        if (!result.success) {
-            setError(result.error ?? 'Não foi possível enviar o código');
+            if (!result.success) {
+                toast.error(result.error ?? 'Não foi possível entrar');
+                setShowSignupCta(result.code === 'USER_NOT_FOUND');
+                setLoading(false);
+                return;
+            }
+
+            if (result.data?.needsOnboarding) {
+                router.push('/onboarding');
+            } else {
+                router.push('/spaces');
+            }
+            router.refresh();
+        } catch {
+            toast.error('Falha ao comunicar com o servidor. Tente novamente.');
             setLoading(false);
-            return;
         }
-
-        setMessage(
-            'Código enviado para seu email. Confira a caixa de entrada.',
-        );
-        setStep('verify');
-        setLoading(false);
-    }
-
-    async function handleVerifyOtp(e: FormEvent) {
-        e.preventDefault();
-        setLoading(true);
-        setError('');
-
-        const result = await verifyOtp(email.trim(), otp.trim());
-
-        if (!result.success) {
-            setError(result.error ?? 'Código inválido');
-            setLoading(false);
-            return;
-        }
-
-        if (result.data?.needsOnboarding) {
-            router.push('/onboarding');
-        } else {
-            router.push('/dashboard');
-        }
-        router.refresh();
     }
 
     return (
@@ -65,56 +49,45 @@ export default function LoginPage() {
                     Entrar
                 </h1>
                 <p className='text-sm text-slate-600'>
-                    Use seu email e código de 6 dígitos.
+                    Use seu email e senha para acessar.
                 </p>
 
-                {step === 'request' ? (
-                    <form className='space-y-3' onSubmit={handleRequestOtp}>
-                        <Input
-                            type='email'
-                            required
-                            placeholder='seuemail@exemplo.com'
-                            value={email}
-                            onChange={(event) => setEmail(event.target.value)}
-                        />
-                        <Button
-                            type='submit'
-                            className='w-full'
-                            disabled={loading}
-                        >
-                            {loading ? 'Enviando...' : 'Enviar código'}
-                        </Button>
-                    </form>
-                ) : (
-                    <form className='space-y-3' onSubmit={handleVerifyOtp}>
-                        <Input
-                            required
-                            placeholder='Código de 6 dígitos'
-                            value={otp}
-                            inputMode='numeric'
-                            maxLength={6}
-                            onChange={(event) =>
-                                setOtp(
-                                    event.target.value
-                                        .replace(/\D/g, '')
-                                        .slice(0, 6),
-                                )
-                            }
-                        />
-                        <Button
-                            type='submit'
-                            className='w-full'
-                            disabled={loading}
-                        >
-                            {loading ? 'Validando...' : 'Entrar'}
-                        </Button>
-                    </form>
-                )}
+                <form className='space-y-3' onSubmit={handleLogin}>
+                    <Input
+                        type='email'
+                        required
+                        placeholder='seuemail@exemplo.com'
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                    />
+                    <Input
+                        type='password'
+                        required
+                        minLength={6}
+                        placeholder='Sua senha'
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                    />
+                    <Button type='submit' className='w-full' disabled={loading}>
+                        {loading ? 'Entrando...' : 'Entrar'}
+                    </Button>
+                </form>
 
-                {message ? (
-                    <p className='text-xs text-emerald-700'>{message}</p>
+                <Link
+                    href='/forgot-password'
+                    className='inline-block text-xs text-indigo-600 underline'
+                >
+                    Esqueci minha senha
+                </Link>
+
+                {showSignupCta ? (
+                    <Link
+                        href={`/signup?email=${encodeURIComponent(email.trim())}`}
+                        className='inline-block text-xs text-indigo-600 underline'
+                    >
+                        Ir para cadastro com este email
+                    </Link>
                 ) : null}
-                {error ? <p className='text-xs text-red-600'>{error}</p> : null}
 
                 <p className='text-sm text-slate-600'>
                     Ainda não tem conta?{' '}

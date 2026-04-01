@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Plus } from 'lucide-react';
+import { Plus, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { LoadingNavButton } from '@/app/components/LoadingNavButton';
 import {
     SettlementCard,
     SpendingSummary,
@@ -18,13 +19,23 @@ import { requireAuthUser } from '@/lib/auth';
 import { getHouseholdContext } from '@/lib/household';
 import { ensureUserHousehold } from '@/app/actions/household';
 
-export default async function DashboardPage() {
+interface DashboardPageProps {
+    searchParams?: Promise<{ spaceId?: string }>;
+}
+
+export default async function DashboardPage({
+    searchParams,
+}: DashboardPageProps) {
     const auth = await requireAuthUser();
-    await ensureUserHousehold();
-    const householdContext = await getHouseholdContext(auth.userId);
+    await ensureUserHousehold(auth.userId);
+    const params = searchParams ? await searchParams : undefined;
+    const householdContext = await getHouseholdContext(
+        auth.userId,
+        params?.spaceId,
+    );
 
     if (!householdContext) {
-        redirect('/onboarding');
+        redirect('/spaces');
     }
 
     const today = new Date();
@@ -161,6 +172,12 @@ export default async function DashboardPage() {
             <div className='max-w-2xl mx-auto space-y-6'>
                 <div className='flex items-start justify-between'>
                     <div>
+                        <Link
+                            href='/spaces'
+                            className='text-xs text-indigo-600 hover:underline'
+                        >
+                            Voltar para spaces
+                        </Link>
                         <h1 className='text-3xl font-bold text-gray-900'>
                             Olá, {auth.name ?? 'você'}!
                         </h1>
@@ -169,15 +186,26 @@ export default async function DashboardPage() {
                         </p>
                     </div>
 
-                    <Link href='/expenses/new'>
-                        <Button
-                            size='icon'
-                            className='rounded-full h-12 w-12 shadow-lg hover:shadow-xl transition-shadow'
-                            title='Adicionar despesa'
-                        >
-                            <Plus className='h-6 w-6' />
-                        </Button>
-                    </Link>
+                    <LoadingNavButton
+                        href={`/expenses/new?spaceId=${householdContext.householdId}`}
+                        size='icon'
+                        className='rounded-full h-12 w-12 shadow-lg hover:shadow-xl transition-shadow'
+                        title='Adicionar despesa'
+                    >
+                        <Plus className='h-6 w-6' />
+                    </LoadingNavButton>
+                </div>
+
+                <div className='flex justify-end'>
+                    <LoadingNavButton
+                        href={`/onboarding?spaceId=${householdContext.householdId}`}
+                        variant='outline'
+                        className='gap-2'
+                        loadingLabel='Abrindo...'
+                    >
+                        <Users className='h-4 w-4' />
+                        Convidar membros
+                    </LoadingNavButton>
                 </div>
 
                 <SettlementCard
@@ -207,19 +235,18 @@ export default async function DashboardPage() {
                     categories={householdContext.categories.map((category) => ({
                         id: category.id,
                         name: category.name,
-                        icon: category.icon ?? undefined,
                     }))}
                 />
 
                 <div className='pt-4 text-center'>
-                    <Link href='/expenses/new'>
-                        <Button
-                            size='lg'
-                            className='w-full h-12 rounded-lg font-semibold text-base'
-                        >
-                            Registrar Nova Despesa
-                        </Button>
-                    </Link>
+                    <LoadingNavButton
+                        href='/expenses/new'
+                        size='lg'
+                        className='w-full h-12 rounded-lg font-semibold text-base'
+                        loadingLabel='Abrindo...'
+                    >
+                        Registrar Nova Despesa
+                    </LoadingNavButton>
                 </div>
             </div>
         </div>

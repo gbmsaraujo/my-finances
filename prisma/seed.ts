@@ -50,10 +50,11 @@ async function main() {
 
     const categories = [
         { name: "Casa", color: "#ef4444", icon: "house", isFixed: true },
-        { name: "Alimentacao", color: "#f97316", icon: "utensils", isFixed: false },
+        { name: "Comida", color: "#f97316", icon: "utensils", isFixed: false },
         { name: "Transporte", color: "#3b82f6", icon: "car", isFixed: false },
         { name: "Lazer", color: "#8b5cf6", icon: "gamepad-2", isFixed: false },
-        { name: "Assinaturas", color: "#06b6d4", icon: "bookmark", isFixed: true }
+        { name: "Assinaturas", color: "#06b6d4", icon: "bookmark", isFixed: true },
+        { name: "Outros", color: "#6b7280", icon: "circle", isFixed: false },
     ];
 
     for (const category of categories) {

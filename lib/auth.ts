@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { syncUserProfile } from "@/lib/user-profile";
 
 export interface AuthContext {
     userId: string;
@@ -15,17 +16,10 @@ export async function requireAuthUser(): Promise<AuthContext> {
         throw new Error("Usuário não autenticado");
     }
 
-    const profile = await prisma.user.upsert({
-        where: { id: data.user.id },
-        update: {
-            email: data.user.email,
-            name: data.user.user_metadata?.name ?? data.user.email.split("@")[0]
-        },
-        create: {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.user_metadata?.name ?? data.user.email.split("@")[0]
-        }
+    const profile = await syncUserProfile({
+        authUserId: data.user.id,
+        email: data.user.email,
+        name: data.user.user_metadata?.name,
     });
 
     return {

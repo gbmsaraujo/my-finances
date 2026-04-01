@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { generateInviteCode, normalizeInviteCode } from "@/lib/utils";
+import { generateInviteCode } from "@/lib/utils";
 import { requireAuthUser } from "@/lib/auth";
 
 interface ActionResponse<T> {
@@ -18,10 +18,60 @@ async function sendInviteEmail(params: {
 }) {
     const apiKey = process.env.RESEND_API_KEY;
     const fromEmail = process.env.INVITE_FROM_EMAIL;
+    const replyTo = process.env.INVITE_REPLY_TO;
 
     if (!apiKey || !fromEmail) {
-        return { sent: false as const, reason: "missing_env" as const };
+        return {
+            sent: false as const,
+            reason: "missing_env" as const,
+            message:
+                "Defina RESEND_API_KEY e INVITE_FROM_EMAIL para enviar convites.",
+        };
     }
+
+    if (/(@gmail\.com|@hotmail\.com|@outlook\.com|@yahoo\.com)/i.test(fromEmail)) {
+        return {
+            sent: false as const,
+            reason: "missing_env" as const,
+            message:
+                "INVITE_FROM_EMAIL precisa ser um remetente validado no Resend (dominio proprio ou onboarding@resend.dev em teste).",
+        };
+    }
+
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+    const inviteLink = `${appUrl}/accept-invite?code=${encodeURIComponent(params.code)}&email=${encodeURIComponent(params.to)}`;
+    const formattedExpiration = new Date(params.expiresAtIso).toLocaleString("pt-BR");
+
+    const textBody = [
+        "My Finances - Convite para space",
+        "",
+        `Você recebeu um convite para entrar no space \"${params.householdName}\".`,
+        "",
+        `Codigo do convite: ${params.code}`,
+        `Link para aceitar: ${inviteLink}`,
+        `Validade: ${formattedExpiration}`,
+        "",
+        "Se você não esperava este email, pode ignorar esta mensagem.",
+    ].join("\n");
+
+    const htmlBody = `
+        <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #111827;">
+            <p style="margin: 0 0 12px;"><strong>My Finances</strong></p>
+            <p style="margin: 0 0 12px;">Você recebeu um convite para entrar no space <strong>${params.householdName}</strong>.</p>
+            <p style="margin: 0 0 8px;">Use o código abaixo para confirmar seu acesso:</p>
+            <p style="margin: 0 0 16px; font-size: 22px; font-weight: 700; letter-spacing: 3px;">${params.code}</p>
+            <p style="margin: 0 0 16px;">
+                <a href="${inviteLink}" style="display:inline-block; background:#4f46e5; color:#ffffff; text-decoration:none; padding:10px 14px; border-radius:8px; font-weight:600;">
+                    Aceitar convite
+                </a>
+            </p>
+            <p style="margin: 0 0 8px; font-size: 14px; color: #374151;">Link direto: <a href="${inviteLink}" style="color:#1d4ed8;">${inviteLink}</a></p>
+            <p style="margin: 0 0 16px; font-size: 14px; color: #374151;">Validade: ${formattedExpiration}</p>
+            <hr style="border:0; border-top:1px solid #e5e7eb; margin: 16px 0;" />
+            <p style="margin: 0; font-size: 12px; color: #6b7280;">Você recebeu este email porque um membro do My Finances convidou este endereço para participar de um space.</p>
+            <p style="margin: 4px 0 0; font-size: 12px; color: #6b7280;">Se não foi você, ignore esta mensagem.</p>
+        </div>
+    `;
 
     const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -32,18 +82,24 @@ async function sendInviteEmail(params: {
         body: JSON.stringify({
             from: fromEmail,
             to: [params.to],
-            subject: `Convite para o space ${params.householdName}`,
-            html: `<div style="font-family: Arial, sans-serif; line-height: 1.5;">
-              <h2>Você foi convidado para o My Finances</h2>
-              <p>Use o código abaixo para entrar no space <strong>${params.householdName}</strong>:</p>
-              <p style="font-size: 24px; font-weight: 700; letter-spacing: 4px;">${params.code}</p>
-              <p>Validade até: ${new Date(params.expiresAtIso).toLocaleString("pt-BR")}</p>
-            </div>`
+            ...(replyTo ? { reply_to: replyTo } : {}),
+            subject: `Convite para acessar o space ${params.householdName} no My Finances`,
+            text: textBody,
+            html: htmlBody,
         })
     });
 
     if (!response.ok) {
-        return { sent: false as const, reason: "provider_error" as const };
+        const providerPayload = await response
+            .json()
+            .catch(() => null as { message?: string } | null);
+        return {
+            sent: false as const,
+            reason: "provider_error" as const,
+            message:
+                providerPayload?.message ||
+                `Resend retornou erro HTTP ${response.status}.`,
+        };
     }
 
     return { sent: true as const };
@@ -57,11 +113,13 @@ async function ensureDefaultCategories(householdId: string) {
         { name: "Comida", color: "#f97316", icon: "utensils", isFixed: false },
         { name: "Transporte", color: "#3b82f6", icon: "car", isFixed: false },
         { name: "Lazer", color: "#8b5cf6", icon: "gamepad-2", isFixed: false },
-        { name: "Assinaturas", color: "#06b6d4", icon: "bookmark", isFixed: true }
+        { name: "Assinaturas", color: "#06b6d4", icon: "bookmark", isFixed: true },
+        { name: "Outros", color: "#6b7280", icon: "circle", isFixed: false },
     ];
 
-    for (const category of categories) {
-        await prisma.category.upsert({
+    await Promise.all(
+        categories.map((category) =>
+            prisma.category.upsert({
             where: {
                 householdId_name: {
                     householdId,
@@ -77,20 +135,22 @@ async function ensureDefaultCategories(householdId: string) {
                 ...category,
                 householdId
             }
-        });
-    }
+            }),
+        ),
+    );
 }
 
-export async function ensureUserHousehold(): Promise<ActionResponse<{ householdId: string }>> {
+export async function ensureUserHousehold(userId?: string): Promise<ActionResponse<{ householdId: string }>> {
     try {
-        const user = await requireAuthUser();
+        const resolvedUserId = userId ?? (await requireAuthUser()).userId;
 
         const existing = await prisma.householdMember.findFirst({
-            where: { userId: user.userId },
+            where: { userId: resolvedUserId },
             include: { household: true }
         });
 
         if (existing?.householdId) {
+            await ensureDefaultCategories(existing.householdId);
             return {
                 success: true,
                 data: { householdId: existing.householdId }
@@ -100,10 +160,10 @@ export async function ensureUserHousehold(): Promise<ActionResponse<{ householdI
         const household = await prisma.household.create({
             data: {
                 name: DEFAULT_HOUSEHOLD_NAME,
-                createdById: user.userId,
+                createdById: resolvedUserId,
                 members: {
                     create: {
-                        userId: user.userId,
+                        userId: resolvedUserId,
                         role: "OWNER"
                     }
                 }
@@ -124,12 +184,28 @@ export async function ensureUserHousehold(): Promise<ActionResponse<{ householdI
     }
 }
 
-export async function createInviteCode(invitedEmail?: string): Promise<ActionResponse<{ code: string; expiresAt: string; emailed: boolean }>> {
+export async function createInviteCode(
+    invitedEmail: string,
+    householdId: string
+): Promise<
+    ActionResponse<{
+        code: string;
+        expiresAt: string;
+    }>
+> {
     try {
+        const normalizedEmail = invitedEmail.trim().toLowerCase();
+        if (!normalizedEmail) {
+            return { success: false, error: "Informe um email para enviar o convite" };
+        }
+
         const user = await requireAuthUser();
 
         const membership = await prisma.householdMember.findFirst({
-            where: { userId: user.userId },
+            where: {
+                userId: user.userId,
+                householdId
+            },
             include: {
                 household: true
             }
@@ -142,25 +218,43 @@ export async function createInviteCode(invitedEmail?: string): Promise<ActionRes
         const code = generateInviteCode();
         const expiresAt = new Date(Date.now() + 1000 * 60 * 30);
 
-        await prisma.householdInvite.create({
+        const invite = await prisma.householdInvite.create({
             data: {
                 householdId: membership.householdId,
                 sentByUserId: user.userId,
-                invitedEmail,
+                invitedEmail: normalizedEmail,
                 code,
                 expiresAt
             }
         });
 
-        let emailed = false;
-        if (invitedEmail) {
-            const emailResult = await sendInviteEmail({
-                to: invitedEmail,
-                code,
-                householdName: membership.household.name,
-                expiresAtIso: expiresAt.toISOString()
+        const emailResult = await sendInviteEmail({
+            to: normalizedEmail,
+            code,
+            householdName: membership.household.name,
+            expiresAtIso: expiresAt.toISOString()
+        });
+
+        if (!emailResult.sent) {
+            await prisma.householdInvite.delete({
+                where: { id: invite.id },
             });
-            emailed = emailResult.sent;
+
+            if (emailResult.reason === "missing_env") {
+                return {
+                    success: false,
+                    error:
+                        emailResult.message ||
+                        "Configuração de email ausente. Defina RESEND_API_KEY e INVITE_FROM_EMAIL.",
+                };
+            }
+
+            return {
+                success: false,
+                error:
+                    emailResult.message ||
+                    "Falha ao enviar convite por email. Tente novamente em instantes.",
+            };
         }
 
         return {
@@ -168,74 +262,12 @@ export async function createInviteCode(invitedEmail?: string): Promise<ActionRes
             data: {
                 code,
                 expiresAt: expiresAt.toISOString(),
-                emailed
             }
         };
     } catch (error) {
         return {
             success: false,
             error: error instanceof Error ? error.message : "Erro ao criar convite"
-        };
-    }
-}
-
-export async function joinHouseholdByCode(codeInput: string): Promise<ActionResponse<{ householdId: string }>> {
-    try {
-        const user = await requireAuthUser();
-        const code = normalizeInviteCode(codeInput);
-
-        if (code.length !== 6) {
-            return { success: false, error: "Código precisa ter 6 dígitos" };
-        }
-
-        const invite = await prisma.householdInvite.findFirst({
-            where: {
-                code,
-                acceptedAt: null,
-                expiresAt: {
-                    gt: new Date()
-                }
-            }
-        });
-
-        if (!invite) {
-            return { success: false, error: "Convite inválido ou expirado" };
-        }
-
-        await prisma.$transaction([
-            prisma.householdMember.upsert({
-                where: {
-                    householdId_userId: {
-                        householdId: invite.householdId,
-                        userId: user.userId
-                    }
-                },
-                update: {},
-                create: {
-                    householdId: invite.householdId,
-                    userId: user.userId,
-                    role: "MEMBER"
-                }
-            }),
-            prisma.householdInvite.update({
-                where: { id: invite.id },
-                data: {
-                    acceptedAt: new Date(),
-                    acceptedByUser: user.userId
-                }
-            })
-        ]);
-
-        return {
-            success: true,
-            data: {
-                householdId: invite.householdId
-            }
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Erro ao entrar no space"
         };
     }
 }

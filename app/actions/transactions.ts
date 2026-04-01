@@ -51,12 +51,36 @@ export async function createTransaction(
 
         // 2. Obter usuário logado
         const auth = await requireAuthUser();
-        const membership = await getCurrentMembership(auth.userId);
+        const category = await prisma.category.findUnique({
+            where: { id: validatedInput.categoryId },
+            select: { householdId: true }
+        });
+
+        if (!category) {
+            return {
+                success: false,
+                error: "Categoria inválida para este space"
+            };
+        }
+
+        const membership = await prisma.householdMember.findFirst({
+            where: {
+                userId: auth.userId,
+                householdId: category.householdId,
+            },
+            include: {
+                household: {
+                    include: {
+                        members: true,
+                    },
+                },
+            },
+        });
 
         if (!membership) {
             return {
                 success: false,
-                error: "Usuário sem space. Conclua onboarding."
+                error: "Você não participa do space desta categoria"
             };
         }
 
@@ -75,20 +99,6 @@ export async function createTransaction(
         const debtType: DebtType = validatedInput.isPrivate
             ? "INDIVIDUAL"
             : validatedInput.debtType;
-
-        const category = await prisma.category.findFirst({
-            where: {
-                id: validatedInput.categoryId,
-                householdId: membership.householdId
-            }
-        });
-
-        if (!category) {
-            return {
-                success: false,
-                error: "Categoria inválida para este space"
-            };
-        }
 
         // 4. Converter amount para Decimal
         const amountDecimal = new Decimal(validatedInput.amount.toString());

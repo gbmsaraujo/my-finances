@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { Toaster } from 'sonner';
 import { ServiceWorkerRegister } from '@/app/components/ServiceWorkerRegister';
 
 export const metadata: Metadata = {
@@ -25,6 +26,7 @@ export default function RootLayout({
         <html lang='pt-BR'>
             <body>
                 <ServiceWorkerRegister />
+                <Toaster richColors position='top-right' />
                 {children}
             </body>
         </html>

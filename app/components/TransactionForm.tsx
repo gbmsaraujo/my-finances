@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -8,6 +8,7 @@ import {
     CreateTransactionInput,
 } from '@/lib/validations/transaction';
 import { createTransaction } from '@/app/actions/transactions';
+import { createCategory } from '@/app/actions/category';
 import {
     Form,
     FormControl,
@@ -27,27 +28,60 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface TransactionFormProps {
-    categories: Array<{ id: string; name: string; icon?: string }>;
+    householdId: string;
+    categories: Array<{ id: string; name: string }>;
     currentUserId: string;
+    participants: Array<{ id: string; name: string }>;
     partnerUserId?: string;
     partnerName: string;
     onSuccess?: () => void;
 }
 
+function formatCurrencyFromDigits(digits: string): string {
+    const numericValue = Number(digits) / 100;
+    return new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(numericValue);
+}
+
 export function TransactionForm({
+    householdId,
     categories,
     currentUserId,
+    participants,
     partnerUserId,
     partnerName,
     onSuccess,
 }: TransactionFormProps) {
+    const [localCategories, setLocalCategories] = useState(categories);
     const [isLoading, setIsLoading] = useState(false);
-    const [successMessage, setSuccessMessage] = useState('');
-    const [errorMessage, setErrorMessage] = useState('');
+    const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+    const [showCreateCategory, setShowCreateCategory] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [amountInput, setAmountInput] = useState('');
+
+    const payerOptions =
+        participants.length > 0
+            ? participants
+            : [{ id: currentUserId, name: 'Você' }];
+
+    const defaultPayerId =
+        payerOptions.find((participant) => participant.id === currentUserId)
+            ?.id ??
+        payerOptions[0]?.id ??
+        '';
+
+    const defaultCategoryId = categories[0]?.id ?? '';
+
+    useEffect(() => {
+        setLocalCategories(categories);
+    }, [categories]);
 
     const form = useForm<CreateTransactionInput>({
         resolver: zodResolver(createTransactionSchema),
@@ -55,75 +89,136 @@ export function TransactionForm({
             description: '',
             amount: 0,
             date: new Date(),
-            categoryId: categories[0]?.id ?? '',
-            payerId: currentUserId,
+            categoryId: defaultCategoryId,
+            payerId: defaultPayerId,
             debtType: 'SHARED',
             note: '',
             isPrivate: false,
         },
     });
 
+    useEffect(() => {
+        const selectedPayer = form.getValues('payerId');
+        if (
+            !payerOptions.some(
+                (participant) => participant.id === selectedPayer,
+            )
+        ) {
+            form.setValue('payerId', defaultPayerId, {
+                shouldDirty: false,
+                shouldValidate: true,
+            });
+        }
+    }, [defaultPayerId, form, payerOptions]);
+
+    useEffect(() => {
+        const selectedCategory = form.getValues('categoryId');
+        if (
+            !localCategories.some(
+                (category) => category.id === selectedCategory,
+            )
+        ) {
+            form.setValue('categoryId', localCategories[0]?.id ?? '', {
+                shouldDirty: false,
+                shouldValidate: true,
+            });
+        }
+    }, [form, localCategories]);
+
     async function onSubmit(data: CreateTransactionInput) {
         setIsLoading(true);
-        setSuccessMessage('');
-        setErrorMessage('');
 
         try {
             const result = await createTransaction(data);
 
             if (result.success) {
-                setSuccessMessage('Despesa registrada com sucesso!');
+                toast.success('Despesa registrada com sucesso!');
                 form.reset({
                     description: '',
                     amount: 0,
                     date: new Date(),
-                    categoryId: categories[0]?.id ?? '',
-                    payerId: currentUserId,
+                    categoryId: localCategories[0]?.id ?? '',
+                    payerId: defaultPayerId,
                     debtType: 'SHARED',
                     note: '',
                     isPrivate: false,
                 });
+                setAmountInput('');
 
-                setTimeout(() => {
-                    setSuccessMessage('');
-                    onSuccess?.();
-                }, 2000);
+                onSuccess?.();
             } else {
-                setErrorMessage(result.error || 'Erro ao registrar despesa');
+                toast.error(result.error || 'Erro ao registrar despesa');
             }
         } catch (error) {
-            setErrorMessage('Erro inesperado ao registrar despesa');
+            toast.error('Erro inesperado ao registrar despesa');
             console.error(error);
         } finally {
             setIsLoading(false);
         }
     }
 
+    async function handleCreateCategory() {
+        const categoryName = newCategoryName.trim();
+        if (!categoryName) {
+            toast.error('Informe o nome da nova categoria');
+            return;
+        }
+
+        setIsCreatingCategory(true);
+
+        try {
+            const result = await createCategory({
+                householdId,
+                name: categoryName,
+            });
+
+            if (!result.success || !result.data) {
+                toast.error(result.error ?? 'Erro ao criar categoria');
+                return;
+            }
+
+            const updatedCategories = [...localCategories, result.data].sort(
+                (a, b) => a.name.localeCompare(b.name, 'pt-BR'),
+            );
+
+            setLocalCategories(updatedCategories);
+            form.setValue('categoryId', result.data.id, {
+                shouldValidate: true,
+                shouldDirty: true,
+            });
+            setNewCategoryName('');
+            setShowCreateCategory(false);
+            toast.success(`Categoria "${result.data.name}" criada`);
+        } catch (error) {
+            toast.error('Erro inesperado ao criar categoria');
+            console.error(error);
+        } finally {
+            setIsCreatingCategory(false);
+        }
+    }
+
     const isPrivate = form.watch('isPrivate');
     const debtType = form.watch('debtType');
+    const categoryId = form.watch('categoryId');
     const payerId = form.watch('payerId');
+    const selectedCategoryName =
+        localCategories.find((category) => category.id === categoryId)?.name ??
+        'Selecione uma categoria';
+
+    const debtTypeLabelMap: Record<CreateTransactionInput['debtType'], string> =
+        {
+            SHARED: 'Compartilhada',
+            INDIVIDUAL: 'Individual',
+            LOAN: 'Empréstimo',
+        };
+    const selectedDebtTypeLabel =
+        debtTypeLabelMap[debtType] ?? 'Selecione o tipo';
+    const selectedPayerName =
+        payerOptions.find((participant) => participant.id === payerId)?.name ??
+        'Você';
 
     return (
         <div className='w-full max-w-md mx-auto'>
-            {successMessage && (
-                <Alert className='mb-4 border-green-500 bg-green-50'>
-                    <CheckCircle2 className='h-4 w-4 text-green-600' />
-                    <AlertDescription className='text-green-800'>
-                        {successMessage}
-                    </AlertDescription>
-                </Alert>
-            )}
-
-            {errorMessage && (
-                <Alert
-                    variant='destructive'
-                    className='mb-4 border-red-500 bg-red-50'
-                >
-                    <AlertCircle className='h-4 w-4' />
-                    <AlertDescription>{errorMessage}</AlertDescription>
-                </Alert>
-            )}
-
             <Form {...form}>
                 <form
                     onSubmit={form.handleSubmit(onSubmit)}
@@ -163,20 +258,33 @@ export function TransactionForm({
                                             R$
                                         </span>
                                         <Input
-                                            type='number'
-                                            inputMode='decimal'
-                                            placeholder='0.00'
-                                            step='0.01'
-                                            min='0'
+                                            type='text'
+                                            inputMode='numeric'
+                                            placeholder='0,00'
                                             className='h-12 pl-10 pr-4 text-lg rounded-lg font-semibold'
-                                            {...field}
-                                            onChange={(event) =>
+                                            value={amountInput}
+                                            onChange={(event) => {
+                                                const digits =
+                                                    event.target.value.replace(
+                                                        /\D/g,
+                                                        '',
+                                                    );
+
+                                                if (!digits) {
+                                                    setAmountInput('');
+                                                    field.onChange(0);
+                                                    return;
+                                                }
+
+                                                setAmountInput(
+                                                    formatCurrencyFromDigits(
+                                                        digits,
+                                                    ),
+                                                );
                                                 field.onChange(
-                                                    parseFloat(
-                                                        event.target.value,
-                                                    ) || 0,
-                                                )
-                                            }
+                                                    Number(digits) / 100,
+                                                );
+                                            }}
                                         />
                                     </div>
                                 </FormControl>
@@ -233,23 +341,67 @@ export function TransactionForm({
                                 >
                                     <FormControl>
                                         <SelectTrigger className='h-12 text-base rounded-lg'>
-                                            <SelectValue placeholder='Selecione uma categoria' />
+                                            <SelectValue placeholder='Selecione uma categoria'>
+                                                {selectedCategoryName}
+                                            </SelectValue>
                                         </SelectTrigger>
                                     </FormControl>
                                     <SelectContent>
-                                        {categories.map((category) => (
+                                        {localCategories.map((category) => (
                                             <SelectItem
                                                 key={category.id}
                                                 value={category.id}
                                             >
-                                                {category.icon
-                                                    ? `${category.icon} `
-                                                    : ''}
                                                 {category.name}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                {showCreateCategory ? (
+                                    <div className='mt-3 flex items-center gap-2'>
+                                        <Input
+                                            value={newCategoryName}
+                                            onChange={(event) =>
+                                                setNewCategoryName(
+                                                    event.target.value,
+                                                )
+                                            }
+                                            placeholder='Ex: Educação, Pets...'
+                                            className='h-10'
+                                        />
+                                        <Button
+                                            type='button'
+                                            onClick={handleCreateCategory}
+                                            disabled={isCreatingCategory}
+                                            variant='secondary'
+                                        >
+                                            {isCreatingCategory
+                                                ? 'Criando...'
+                                                : 'Salvar'}
+                                        </Button>
+                                        <Button
+                                            type='button'
+                                            variant='outline'
+                                            onClick={() => {
+                                                setShowCreateCategory(false);
+                                                setNewCategoryName('');
+                                            }}
+                                        >
+                                            Cancelar
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <Button
+                                        type='button'
+                                        variant='outline'
+                                        className='mt-2 h-10'
+                                        onClick={() =>
+                                            setShowCreateCategory(true)
+                                        }
+                                    >
+                                        + Adicionar nova categoria
+                                    </Button>
+                                )}
                                 <FormMessage />
                             </FormItem>
                         )}
@@ -269,7 +421,9 @@ export function TransactionForm({
                                 >
                                     <FormControl>
                                         <SelectTrigger className='h-12 text-base rounded-lg'>
-                                            <SelectValue />
+                                            <SelectValue placeholder='Selecione o tipo'>
+                                                {selectedDebtTypeLabel}
+                                            </SelectValue>
                                         </SelectTrigger>
                                     </FormControl>
                                     <SelectContent>
@@ -306,18 +460,20 @@ export function TransactionForm({
                                 >
                                     <FormControl>
                                         <SelectTrigger className='h-12 text-base rounded-lg'>
-                                            <SelectValue />
+                                            <SelectValue placeholder='Selecione quem pagou'>
+                                                {selectedPayerName}
+                                            </SelectValue>
                                         </SelectTrigger>
                                     </FormControl>
                                     <SelectContent>
-                                        <SelectItem value={currentUserId}>
-                                            Eu
-                                        </SelectItem>
-                                        {partnerUserId ? (
-                                            <SelectItem value={partnerUserId}>
-                                                {partnerName}
+                                        {payerOptions.map((participant) => (
+                                            <SelectItem
+                                                key={participant.id}
+                                                value={participant.id}
+                                            >
+                                                {participant.name}
                                             </SelectItem>
-                                        ) : null}
+                                        ))}
                                     </SelectContent>
                                 </Select>
                                 <FormMessage />

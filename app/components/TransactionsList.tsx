@@ -40,7 +40,7 @@ interface Transaction {
 interface TransactionsListProps {
     transactions: Transaction[];
     currentUserId: string;
-    categories: Array<{ id: string; name: string; icon?: string }>;
+    categories: Array<{ id: string; name: string }>;
     isLoading?: boolean;
     onCategoryChange?: (categoryId: string) => void;
 }
@@ -124,11 +124,6 @@ export function TransactionsList({
                                 </SelectItem>
                                 {categories.map((cat) => (
                                     <SelectItem key={cat.id} value={cat.id}>
-                                        {cat.icon && (
-                                            <span className='mr-2'>
-                                                {cat.icon}
-                                            </span>
-                                        )}
                                         {cat.name}
                                     </SelectItem>
                                 ))}

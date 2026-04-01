@@ -2,7 +2,13 @@ import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabasePublicKey, getSupabaseUrl } from "@/lib/supabase/env";
 
-const protectedPrefixes = ["/dashboard", "/expenses", "/onboarding"];
+const protectedPrefixes = [
+    "/dashboard",
+    "/expenses",
+    "/onboarding",
+    "/spaces",
+    "/profile",
+];
 const authPrefixes = ["/login", "/signup"];
 
 export async function middleware(request: NextRequest) {
@@ -39,7 +45,7 @@ export async function middleware(request: NextRequest) {
     }
 
     if (user && isAuthRoute) {
-        return NextResponse.redirect(new URL("/dashboard", request.url));
+        return NextResponse.redirect(new URL("/spaces", request.url));
     }
 
     return response;

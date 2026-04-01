@@ -1,6 +1,5 @@
-const CACHE_NAME = 'my-finances-v1';
+const CACHE_NAME = 'my-finances-v2';
 const ASSETS_TO_CACHE = [
-    '/',
     '/manifest.json',
     '/icons/icon-192.svg',
     '/icons/icon-512.svg',
@@ -38,10 +37,24 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Never cache Next.js runtime/chunks to avoid ChunkLoadError after deploy/restart.
+    if (url.pathname.startsWith('/_next/')) {
+        return;
+    }
+
+    // Avoid stale app shell/styles by not caching document navigations.
+    if (event.request.mode === 'navigate') {
+        return;
+    }
+
     event.respondWith(
         caches.match(event.request).then((cached) => {
             if (cached) {
                 return cached;
+            }
+
+            if (!ASSETS_TO_CACHE.includes(url.pathname)) {
+                return fetch(event.request);
             }
 
             return fetch(event.request).then((response) => {
