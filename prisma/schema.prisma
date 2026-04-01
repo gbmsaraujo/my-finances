@@ -22,6 +22,11 @@ enum DebtType {
   LOAN
 }
 
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
 model User {
   id    String  @id @default(uuid())
   email String  @unique
@@ -135,6 +140,7 @@ model Transaction {
   isShared  Boolean @default(true) // Se true, divide por 2
   isPrivate Boolean @default(false) // Se true, só o dono vê
   debtType  DebtType @default(SHARED)
+  paymentStatus PaymentStatus @default(PENDING)
   note      String?
 
   createdAt DateTime @default(now())
@@ -145,4 +151,5 @@ model Transaction {
   @@index([isShared])
   @@index([categoryId])
   @@index([payerId])
+  @@index([paymentStatus])
 }

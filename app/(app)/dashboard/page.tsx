@@ -18,9 +18,10 @@ import { prisma } from '@/lib/prisma';
 import { requireAuthUser } from '@/lib/auth';
 import { getHouseholdContext } from '@/lib/household';
 import { ensureUserHousehold } from '@/app/actions/household';
+import { parseTransactionStatus } from '@/lib/transaction-status';
 
 interface DashboardPageProps {
-    searchParams?: Promise<{ spaceId?: string }>;
+    searchParams?: Promise<{ spaceId?: string; month?: string; year?: string }>;
 }
 
 export default async function DashboardPage({
@@ -29,6 +30,16 @@ export default async function DashboardPage({
     const auth = await requireAuthUser();
     await ensureUserHousehold(auth.userId);
     const params = searchParams ? await searchParams : undefined;
+    const now = new Date();
+    const selectedMonth = Math.min(
+        12,
+        Math.max(
+            1,
+            Number(params?.month ?? now.getMonth() + 1) || now.getMonth() + 1,
+        ),
+    );
+    const selectedYear =
+        Number(params?.year ?? now.getFullYear()) || now.getFullYear();
     const householdContext = await getHouseholdContext(
         auth.userId,
         params?.spaceId,
@@ -38,9 +49,8 @@ export default async function DashboardPage({
         redirect('/spaces');
     }
 
-    const today = new Date();
-    const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const startDate = new Date(selectedYear, selectedMonth - 1, 1);
+    const endDate = new Date(selectedYear, selectedMonth, 1);
 
     const transactions = await prisma.transaction.findMany({
         where: {
@@ -66,24 +76,37 @@ export default async function DashboardPage({
         },
     });
 
-    const normalizedTransactions = transactions.map((transaction) => ({
-        id: transaction.id,
-        description: transaction.description,
-        amount: transaction.amount.toNumber(),
-        date: transaction.date,
-        categoryId: transaction.categoryId,
-        category: {
-            name: transaction.category.name,
-            color: transaction.category.color,
-            icon: transaction.category.icon ?? undefined,
-        },
-        userId: transaction.userId,
-        payerId: transaction.payerId,
-        isShared: transaction.isShared,
-        isPrivate: transaction.isPrivate,
-        debtType: transaction.debtType,
-        note: transaction.note,
-    }));
+    const normalizedTransactions = transactions.map((transaction) => {
+        const { status: legacyStatus, note } = parseTransactionStatus(
+            transaction.note,
+        );
+        const dbPaymentStatus =
+            (transaction as { paymentStatus?: 'PENDING' | 'PAID' })
+                .paymentStatus ?? 'PENDING';
+
+        return {
+            id: transaction.id,
+            description: transaction.description,
+            amount: transaction.amount.toNumber(),
+            date: transaction.date,
+            categoryId: transaction.categoryId,
+            category: {
+                name: transaction.category.name,
+                color: transaction.category.color,
+                icon: transaction.category.icon ?? undefined,
+            },
+            userId: transaction.userId,
+            payerId: transaction.payerId,
+            isShared: transaction.isShared,
+            isPrivate: transaction.isPrivate,
+            debtType: transaction.debtType,
+            paymentStatus:
+                dbPaymentStatus === 'PENDING' && legacyStatus === 'PAID'
+                    ? 'PAID'
+                    : dbPaymentStatus,
+            note,
+        };
+    });
 
     const partnerId = householdContext.partner?.id;
     const partnerName = householdContext.partner?.name ?? 'Parceiro(a)';
@@ -232,6 +255,9 @@ export default async function DashboardPage({
                 <TransactionsList
                     transactions={normalizedTransactions}
                     currentUserId={auth.userId}
+                    householdId={householdContext.householdId}
+                    selectedMonth={selectedMonth}
+                    selectedYear={selectedYear}
                     categories={householdContext.categories.map((category) => ({
                         id: category.id,
                         name: category.name,
@@ -240,7 +266,7 @@ export default async function DashboardPage({
 
                 <div className='pt-4 text-center'>
                     <LoadingNavButton
-                        href='/expenses/new'
+                        href={`/expenses/new?spaceId=${householdContext.householdId}`}
                         size='lg'
                         className='w-full h-12 rounded-lg font-semibold text-base'
                         loadingLabel='Abrindo...'

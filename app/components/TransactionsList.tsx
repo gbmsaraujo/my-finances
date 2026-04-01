@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Card,
     CardContent,
@@ -18,6 +19,8 @@ import {
 } from '@/components/ui/select';
 import { Lock, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { toggleTransactionPaymentStatus } from '@/app/actions/transactions';
 
 interface Transaction {
     id: string;
@@ -34,12 +37,16 @@ interface Transaction {
     isShared: boolean;
     isPrivate: boolean;
     debtType: 'SHARED' | 'INDIVIDUAL' | 'LOAN';
+    paymentStatus: 'PENDING' | 'PAID';
     note?: string | null;
 }
 
 interface TransactionsListProps {
     transactions: Transaction[];
     currentUserId: string;
+    householdId: string;
+    selectedMonth: number;
+    selectedYear: number;
     categories: Array<{ id: string; name: string }>;
     isLoading?: boolean;
     onCategoryChange?: (categoryId: string) => void;
@@ -48,21 +55,116 @@ interface TransactionsListProps {
 export function TransactionsList({
     transactions,
     currentUserId,
+    householdId,
+    selectedMonth,
+    selectedYear,
     categories,
     isLoading = false,
     onCategoryChange,
 }: TransactionsListProps) {
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const [isChangingPeriod, startTransition] = useTransition();
+    const [localTransactions, setLocalTransactions] = useState(transactions);
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
+    const [selectedStatus, setSelectedStatus] = useState<
+        'all' | 'PENDING' | 'PAID'
+    >('all');
+    const [updatingTransactionId, setUpdatingTransactionId] = useState<
+        string | null
+    >(null);
+
+    useEffect(() => {
+        setLocalTransactions(transactions);
+    }, [transactions]);
+
+    const monthOptions = [
+        { value: 1, label: 'Janeiro' },
+        { value: 2, label: 'Fevereiro' },
+        { value: 3, label: 'Março' },
+        { value: 4, label: 'Abril' },
+        { value: 5, label: 'Maio' },
+        { value: 6, label: 'Junho' },
+        { value: 7, label: 'Julho' },
+        { value: 8, label: 'Agosto' },
+        { value: 9, label: 'Setembro' },
+        { value: 10, label: 'Outubro' },
+        { value: 11, label: 'Novembro' },
+        { value: 12, label: 'Dezembro' },
+    ];
+
+    const yearOptions = Array.from({ length: 5 }, (_, index) => {
+        const base = new Date().getFullYear() - 2;
+        const year = base + index;
+        return { value: year, label: String(year) };
+    });
 
     const handleCategoryChange = (categoryId: string) => {
         setSelectedCategory(categoryId);
         onCategoryChange?.(categoryId);
     };
 
+    const updateMonthYear = (month: number, year: number) => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('month', String(month));
+        params.set('year', String(year));
+        params.set('spaceId', householdId);
+        startTransition(() => {
+            router.push(`/dashboard?${params.toString()}`);
+        });
+    };
+
+    const handleMonthChange = (month: string) => {
+        updateMonthYear(Number(month), selectedYear);
+    };
+
+    const handleYearChange = (year: string) => {
+        updateMonthYear(selectedMonth, Number(year));
+    };
+
+    const handleToggleStatus = async (transaction: Transaction) => {
+        const nextStatus =
+            transaction.paymentStatus === 'PAID' ? 'PENDING' : 'PAID';
+        setUpdatingTransactionId(transaction.id);
+
+        const result = await toggleTransactionPaymentStatus(
+            transaction.id,
+            nextStatus,
+        );
+        if (!result.success || !result.data) {
+            toast.error(result.error ?? 'Não foi possível atualizar o status');
+            setUpdatingTransactionId(null);
+            return;
+        }
+
+        setLocalTransactions((current) =>
+            current.map((item) =>
+                item.id === transaction.id
+                    ? { ...item, paymentStatus: result.data!.paymentStatus }
+                    : item,
+            ),
+        );
+        toast.success(
+            nextStatus === 'PAID'
+                ? 'Despesa marcada como paga'
+                : 'Despesa marcada como pendente',
+        );
+        setUpdatingTransactionId(null);
+    };
+
     const filteredTransactions =
         selectedCategory === 'all'
-            ? transactions
-            : transactions.filter((t) => t.categoryId === selectedCategory);
+            ? localTransactions
+            : localTransactions.filter(
+                  (t) => t.categoryId === selectedCategory,
+              );
+
+    const statusFilteredTransactions =
+        selectedStatus === 'all'
+            ? filteredTransactions
+            : filteredTransactions.filter(
+                  (t) => t.paymentStatus === selectedStatus,
+              );
 
     const isYourTransaction = (t: Transaction) => t.userId === currentUserId;
     const youPaid = (t: Transaction) => t.payerId === currentUserId;
@@ -84,7 +186,7 @@ export function TransactionsList({
         );
     }
 
-    if (transactions.length === 0) {
+    if (localTransactions.length === 0) {
         return (
             <Card>
                 <CardContent className='pt-12 pb-12 text-center'>
@@ -110,10 +212,51 @@ export function TransactionsList({
                     </div>
 
                     {/* Filtro de Categoria */}
-                    <div className='flex gap-2'>
+                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                        <Select
+                            value={String(selectedMonth)}
+                            onValueChange={handleMonthChange}
+                            disabled={isChangingPeriod}
+                        >
+                            <SelectTrigger className='h-10 text-sm'>
+                                <SelectValue placeholder='Mês' />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {monthOptions.map((month) => (
+                                    <SelectItem
+                                        key={month.value}
+                                        value={String(month.value)}
+                                    >
+                                        {month.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select
+                            value={String(selectedYear)}
+                            onValueChange={handleYearChange}
+                            disabled={isChangingPeriod}
+                        >
+                            <SelectTrigger className='h-10 text-sm'>
+                                <SelectValue placeholder='Ano' />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {yearOptions.map((year) => (
+                                    <SelectItem
+                                        key={year.value}
+                                        value={String(year.value)}
+                                    >
+                                        {year.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
                         <Select
                             value={selectedCategory}
                             onValueChange={handleCategoryChange}
+                            disabled={isChangingPeriod}
                         >
                             <SelectTrigger className='h-10 text-sm'>
                                 <SelectValue placeholder='Todas as categorias' />
@@ -129,18 +272,44 @@ export function TransactionsList({
                                 ))}
                             </SelectContent>
                         </Select>
+
+                        <Select
+                            value={selectedStatus}
+                            onValueChange={(
+                                value: 'all' | 'PENDING' | 'PAID',
+                            ) => setSelectedStatus(value)}
+                            disabled={isChangingPeriod}
+                        >
+                            <SelectTrigger className='h-10 text-sm'>
+                                <SelectValue placeholder='Status' />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value='all'>
+                                    Todos os status
+                                </SelectItem>
+                                <SelectItem value='PENDING'>
+                                    Pendentes
+                                </SelectItem>
+                                <SelectItem value='PAID'>Pagas</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
+                    {isChangingPeriod ? (
+                        <p className='text-xs text-slate-500'>
+                            Carregando despesas do período selecionado...
+                        </p>
+                    ) : null}
                 </div>
             </CardHeader>
 
             <CardContent>
                 <div className='space-y-3'>
-                    {filteredTransactions.length === 0 ? (
+                    {statusFilteredTransactions.length === 0 ? (
                         <p className='text-center text-gray-500 dark:text-gray-400 py-4'>
-                            Nenhuma transação nesta categoria
+                            Nenhuma transação para os filtros selecionados
                         </p>
                     ) : (
-                        filteredTransactions.map((transaction) => (
+                        statusFilteredTransactions.map((transaction) => (
                             <TransactionItem
                                 key={transaction.id}
                                 transaction={transaction}
@@ -148,6 +317,12 @@ export function TransactionsList({
                                     transaction,
                                 )}
                                 youPaid={youPaid(transaction)}
+                                isUpdating={
+                                    updatingTransactionId === transaction.id
+                                }
+                                onToggleStatus={() =>
+                                    handleToggleStatus(transaction)
+                                }
                             />
                         ))
                     )}
@@ -161,12 +336,16 @@ interface TransactionItemProps {
     transaction: Transaction;
     isYourTransaction: boolean;
     youPaid: boolean;
+    isUpdating: boolean;
+    onToggleStatus: () => void;
 }
 
 function TransactionItem({
     transaction,
     isYourTransaction,
     youPaid,
+    isUpdating,
+    onToggleStatus,
 }: TransactionItemProps) {
     const date = new Date(transaction.date);
     const formattedDate = date.toLocaleDateString('pt-BR', {
@@ -207,6 +386,18 @@ function TransactionItem({
 
                     {/* Badges */}
                     <div className='flex gap-1 flex-shrink-0'>
+                        <Badge
+                            variant={
+                                transaction.paymentStatus === 'PAID'
+                                    ? 'default'
+                                    : 'outline'
+                            }
+                            className='text-xs'
+                        >
+                            {transaction.paymentStatus === 'PAID'
+                                ? 'Pago'
+                                : 'Pendente'}
+                        </Badge>
                         {transaction.isPrivate && (
                             <Badge
                                 variant='secondary'
@@ -238,6 +429,22 @@ function TransactionItem({
                         {transaction.note}
                     </p>
                 ) : null}
+
+                <div className='mt-2'>
+                    <Button
+                        type='button'
+                        size='sm'
+                        variant='outline'
+                        disabled={isUpdating}
+                        onClick={onToggleStatus}
+                    >
+                        {isUpdating
+                            ? 'Atualizando...'
+                            : transaction.paymentStatus === 'PAID'
+                              ? 'Voltar para pendente'
+                              : 'Marcar como pago'}
+                    </Button>
+                </div>
             </div>
 
             {/* Amount */}

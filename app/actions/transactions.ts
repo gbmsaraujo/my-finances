@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
     createTransactionSchema,
@@ -11,6 +12,10 @@ import { calculateSettlement } from "@/lib/calculations";
 import { Decimal } from "@prisma/client/runtime/library";
 import { requireAuthUser } from "@/lib/auth";
 import { DebtType } from "@/types/transaction";
+import {
+    parseTransactionStatus,
+    TransactionPaymentStatus,
+} from "@/lib/transaction-status";
 
 /**
  * Resposta padronizada para todas as Server Actions
@@ -116,9 +121,13 @@ export async function createTransaction(
                 isShared,
                 isPrivate: validatedInput.isPrivate,
                 debtType,
+                paymentStatus: "PENDING",
                 note: validatedInput.note,
             },
         });
+
+        revalidatePath("/dashboard");
+        revalidatePath("/expenses/new");
 
         return {
             success: true,
@@ -171,6 +180,7 @@ export async function getTransactions(
             isShared: boolean;
             isPrivate: boolean;
             debtType: DebtType;
+            paymentStatus: TransactionPaymentStatus;
             note?: string | null;
         }>
     >
@@ -226,20 +236,29 @@ export async function getTransactions(
         });
 
         // 5. Converter Decimal para Number
-        const formattedTransactions = transactions.map((t) => ({
-            id: t.id,
-            description: t.description,
-            amount: typeof t.amount === "number" ? t.amount : t.amount.toNumber(),
-            date: t.date,
-            categoryId: t.categoryId,
-            category: t.category,
-            userId: t.userId,
-            payerId: t.payerId,
-            isShared: t.isShared,
-            isPrivate: t.isPrivate,
-            debtType: t.debtType,
-            note: t.note,
-        }));
+        const formattedTransactions = transactions.map((t) => {
+            const { status: legacyStatus, note } = parseTransactionStatus(t.note);
+            const paymentStatus: TransactionPaymentStatus =
+                t.paymentStatus === "PENDING" && legacyStatus === "PAID"
+                    ? "PAID"
+                    : t.paymentStatus;
+
+            return {
+                id: t.id,
+                description: t.description,
+                amount: typeof t.amount === "number" ? t.amount : t.amount.toNumber(),
+                date: t.date,
+                categoryId: t.categoryId,
+                category: t.category,
+                userId: t.userId,
+                payerId: t.payerId,
+                isShared: t.isShared,
+                isPrivate: t.isPrivate,
+                debtType: t.debtType,
+                paymentStatus,
+                note,
+            };
+        });
 
         return {
             success: true,
@@ -258,6 +277,69 @@ export async function getTransactions(
         return {
             success: false,
             error: "Erro ao buscar transações",
+        };
+    }
+}
+
+export async function toggleTransactionPaymentStatus(
+    transactionId: string,
+    status: TransactionPaymentStatus,
+): Promise<ActionResponse<{ id: string; paymentStatus: TransactionPaymentStatus }>> {
+    try {
+        const auth = await requireAuthUser();
+        const transaction = await prisma.transaction.findUnique({
+            where: { id: transactionId },
+            select: {
+                id: true,
+                householdId: true,
+                note: true,
+            },
+        });
+
+        if (!transaction) {
+            return {
+                success: false,
+                error: "Transação não encontrada",
+            };
+        }
+
+        const membership = await prisma.householdMember.findFirst({
+            where: {
+                userId: auth.userId,
+                householdId: transaction.householdId,
+            },
+            select: { householdId: true },
+        });
+
+        if (!membership) {
+            return {
+                success: false,
+                error: "Você não tem acesso a esta transação",
+            };
+        }
+
+        const { note } = parseTransactionStatus(transaction.note);
+        await prisma.transaction.update({
+            where: { id: transactionId },
+            data: {
+                paymentStatus: status,
+                note,
+            },
+        });
+
+        revalidatePath("/dashboard");
+
+        return {
+            success: true,
+            data: {
+                id: transactionId,
+                paymentStatus: status,
+            },
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Erro ao atualizar status",
         };
     }
 }

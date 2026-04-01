@@ -50,6 +50,18 @@ function formatCurrencyFromDigits(digits: string): string {
     }).format(numericValue);
 }
 
+function toInputDate(value: Date): string {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function fromInputDate(value: string): Date {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
 export function TransactionForm({
     householdId,
     categories,
@@ -310,14 +322,14 @@ export function TransactionForm({
                                         className='h-12 text-lg rounded-lg'
                                         value={
                                             field.value instanceof Date
-                                                ? field.value
-                                                      .toISOString()
-                                                      .split('T')[0]
+                                                ? toInputDate(field.value)
                                                 : ''
                                         }
                                         onChange={(event) =>
                                             field.onChange(
-                                                new Date(event.target.value),
+                                                fromInputDate(
+                                                    event.target.value,
+                                                ),
                                             )
                                         }
                                     />
