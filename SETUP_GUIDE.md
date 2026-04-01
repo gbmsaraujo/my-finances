@@ -243,16 +243,34 @@ Atualize `package.json`:
         "build": "next build",
         "start": "next start",
         "lint": "next lint",
-        "test": "vitest",
+        "test": "vitest run",
         "test:ui": "vitest --ui",
-        "test:watch": "vitest --watch",
-        "db:push": "prisma db push",
+        "test:watch": "vitest",
+        "prisma:generate": "prisma generate",
+        "db:migrate": "prisma migrate dev",
+        "db:deploy": "prisma migrate deploy",
         "db:seed": "prisma db seed",
-        "db:studio": "prisma studio",
-        "db:reset": "prisma migrate reset"
+        "db:seed:prod": "SEED_PROD=true prisma db seed"
     }
 }
 ```
+
+### 11. Produção com segurança (Prisma + Vercel)
+
+Fluxo recomendado para produção:
+
+```bash
+# 1) Deploy de schema versionado (sem reset)
+npm run db:deploy
+
+# 2) Seed inicial opcional e explícito
+npm run db:seed:prod
+```
+
+Evite em produção:
+
+- `prisma db push`
+- `prisma migrate reset`
 
 ---
 

@@ -2,7 +2,21 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+function assertProductionSeedSafety() {
+    if (process.env.NODE_ENV !== "production") {
+        return;
+    }
+
+    if (process.env.SEED_PROD !== "true") {
+        throw new Error(
+            "Seed em produção bloqueado. Defina SEED_PROD=true para executar explicitamente."
+        );
+    }
+}
+
 async function main() {
+    assertProductionSeedSafety();
+
     const ownerEmail = "gabriel@example.com";
 
     const owner = await prisma.user.upsert({

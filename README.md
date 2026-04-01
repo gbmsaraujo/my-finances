@@ -252,8 +252,36 @@ WHERE (isPrivate = false) OR (userId = auth.uid())
 ### Vercel (Recomendado)
 
 ```bash
-vercel deploy
+# 1) Linkar projeto (uma vez)
+vercel link
+
+# 2) Aplicar migrations em produção
+npm run db:deploy
+
+# 3) Seed inicial em produção (opcional e explícito)
+npm run db:seed:prod
 ```
+
+### Deploy Automático com GitHub Actions
+
+O repositório inclui workflow em `.github/workflows/ci-cd-vercel.yml` com:
+
+- `lint`, `test` e `build` em push/PR
+- deploy automático para Vercel em `push` na `main`
+
+Configure os seguintes secrets no GitHub:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `RESEND_API_KEY` (opcional)
+- `INVITE_FROM_EMAIL` (opcional)
+- `INVITE_REPLY_TO` (opcional)
+- `NEXT_PUBLIC_APP_URL` (opcional)
 
 ### Docker
 

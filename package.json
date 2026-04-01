@@ -12,7 +12,9 @@
         "test:ui": "vitest --ui",
         "prisma:generate": "prisma generate",
         "db:migrate": "prisma migrate dev",
-        "db:seed": "prisma db seed"
+        "db:deploy": "prisma migrate deploy",
+        "db:seed": "prisma db seed",
+        "db:seed:prod": "SEED_PROD=true prisma db seed"
     },
     "prisma": {
         "seed": "ts-node --compiler-options {\"module\":\"commonjs\"} prisma/seed.ts"
