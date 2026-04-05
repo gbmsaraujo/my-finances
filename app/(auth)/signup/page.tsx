@@ -61,17 +61,10 @@ export default function SignupPage() {
                 return;
             }
 
-            if (result.data?.emailConfirmationRequired) {
-                toast.success('Conta criada. Confirme seu email e faça login.');
-                router.push('/login');
-                router.refresh();
-                return;
-            }
-
             toast.success(
-                'Conta criada com sucesso. Faça login para continuar.',
+                'Conta criada com sucesso. Vamos configurar seu space.',
             );
-            router.push('/login');
+            router.push('/onboarding');
             router.refresh();
         } catch {
             toast.error('Falha ao comunicar com o servidor. Tente novamente.');

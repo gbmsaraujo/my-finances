@@ -1,108 +1,14 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { generateInviteCode } from "@/lib/utils";
 import { requireAuthUser } from "@/lib/auth";
+import { createValidationCode } from "@/lib/validation-codes";
+import { sendVerificationEmail } from "@/lib/verification-email";
 
 interface ActionResponse<T> {
     success: boolean;
     data?: T;
     error?: string;
-}
-
-async function sendInviteEmail(params: {
-    to: string;
-    code: string;
-    householdName: string;
-    expiresAtIso: string;
-}) {
-    const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.INVITE_FROM_EMAIL;
-    const replyTo = process.env.INVITE_REPLY_TO;
-
-    if (!apiKey || !fromEmail) {
-        return {
-            sent: false as const,
-            reason: "missing_env" as const,
-            message:
-                "Defina RESEND_API_KEY e INVITE_FROM_EMAIL para enviar convites.",
-        };
-    }
-
-    if (/(@gmail\.com|@hotmail\.com|@outlook\.com|@yahoo\.com)/i.test(fromEmail)) {
-        return {
-            sent: false as const,
-            reason: "missing_env" as const,
-            message:
-                "INVITE_FROM_EMAIL precisa ser um remetente validado no Resend (dominio proprio ou onboarding@resend.dev em teste).",
-        };
-    }
-
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
-    const inviteLink = `${appUrl}/accept-invite?code=${encodeURIComponent(params.code)}&email=${encodeURIComponent(params.to)}`;
-    const formattedExpiration = new Date(params.expiresAtIso).toLocaleString("pt-BR");
-
-    const textBody = [
-        "My Finances - Convite para space",
-        "",
-        `Você recebeu um convite para entrar no space \"${params.householdName}\".`,
-        "",
-        `Codigo do convite: ${params.code}`,
-        `Link para aceitar: ${inviteLink}`,
-        `Validade: ${formattedExpiration}`,
-        "",
-        "Se você não esperava este email, pode ignorar esta mensagem.",
-    ].join("\n");
-
-    const htmlBody = `
-        <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #111827;">
-            <p style="margin: 0 0 12px;"><strong>My Finances</strong></p>
-            <p style="margin: 0 0 12px;">Você recebeu um convite para entrar no space <strong>${params.householdName}</strong>.</p>
-            <p style="margin: 0 0 8px;">Use o código abaixo para confirmar seu acesso:</p>
-            <p style="margin: 0 0 16px; font-size: 22px; font-weight: 700; letter-spacing: 3px;">${params.code}</p>
-            <p style="margin: 0 0 16px;">
-                <a href="${inviteLink}" style="display:inline-block; background:#4f46e5; color:#ffffff; text-decoration:none; padding:10px 14px; border-radius:8px; font-weight:600;">
-                    Aceitar convite
-                </a>
-            </p>
-            <p style="margin: 0 0 8px; font-size: 14px; color: #374151;">Link direto: <a href="${inviteLink}" style="color:#1d4ed8;">${inviteLink}</a></p>
-            <p style="margin: 0 0 16px; font-size: 14px; color: #374151;">Validade: ${formattedExpiration}</p>
-            <hr style="border:0; border-top:1px solid #e5e7eb; margin: 16px 0;" />
-            <p style="margin: 0; font-size: 12px; color: #6b7280;">Você recebeu este email porque um membro do My Finances convidou este endereço para participar de um space.</p>
-            <p style="margin: 4px 0 0; font-size: 12px; color: #6b7280;">Se não foi você, ignore esta mensagem.</p>
-        </div>
-    `;
-
-    const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            from: fromEmail,
-            to: [params.to],
-            ...(replyTo ? { reply_to: replyTo } : {}),
-            subject: `Convite para acessar o space ${params.householdName} no My Finances`,
-            text: textBody,
-            html: htmlBody,
-        })
-    });
-
-    if (!response.ok) {
-        const providerPayload = await response
-            .json()
-            .catch(() => null as { message?: string } | null);
-        return {
-            sent: false as const,
-            reason: "provider_error" as const,
-            message:
-                providerPayload?.message ||
-                `Resend retornou erro HTTP ${response.status}.`,
-        };
-    }
-
-    return { sent: true as const };
 }
 
 const DEFAULT_HOUSEHOLD_NAME = "Despesas de casa";
@@ -120,21 +26,21 @@ async function ensureDefaultCategories(householdId: string) {
     await Promise.all(
         categories.map((category) =>
             prisma.category.upsert({
-            where: {
-                householdId_name: {
-                    householdId,
-                    name: category.name
+                where: {
+                    householdId_name: {
+                        householdId,
+                        name: category.name
+                    }
+                },
+                update: {
+                    color: category.color,
+                    icon: category.icon,
+                    isFixed: category.isFixed
+                },
+                create: {
+                    ...category,
+                    householdId
                 }
-            },
-            update: {
-                color: category.color,
-                icon: category.icon,
-                isFixed: category.isFixed
-            },
-            create: {
-                ...category,
-                householdId
-            }
             }),
         ),
     );
@@ -215,28 +121,22 @@ export async function createInviteCode(
             return { success: false, error: "Você precisa criar seu space primeiro" };
         }
 
-        const code = generateInviteCode();
-        const expiresAt = new Date(Date.now() + 1000 * 60 * 30);
-
-        const invite = await prisma.householdInvite.create({
-            data: {
-                householdId: membership.householdId,
-                sentByUserId: user.userId,
-                invitedEmail: normalizedEmail,
-                code,
-                expiresAt
-            }
+        const invite = await createValidationCode({
+            type: "INVITE",
+            email: normalizedEmail,
+            householdId: membership.householdId,
         });
 
-        const emailResult = await sendInviteEmail({
+        const emailResult = await sendVerificationEmail({
+            type: "invite",
             to: normalizedEmail,
-            code,
+            code: invite.code,
             householdName: membership.household.name,
-            expiresAtIso: expiresAt.toISOString()
+            expiresAtIso: invite.expiresAt.toISOString(),
         });
 
         if (!emailResult.sent) {
-            await prisma.householdInvite.delete({
+            await prisma.validationCode.delete({
                 where: { id: invite.id },
             });
 
@@ -260,8 +160,8 @@ export async function createInviteCode(
         return {
             success: true,
             data: {
-                code,
-                expiresAt: expiresAt.toISOString(),
+                code: invite.code,
+                expiresAt: invite.expiresAt.toISOString(),
             }
         };
     } catch (error) {

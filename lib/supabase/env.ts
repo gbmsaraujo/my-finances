@@ -19,3 +19,13 @@ export function getSupabasePublicKey() {
 
     return key;
 }
+
+export function getSupabaseServiceRoleKey() {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!key) {
+        throw new Error("SUPABASE_SERVICE_ROLE_KEY não definida");
+    }
+
+    return key;
+}

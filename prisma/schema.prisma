@@ -28,6 +28,12 @@ enum PaymentStatus {
   PAID
 }
 
+enum ValidationCodeType {
+  SIGNUP
+  FORGOT_PASSWORD
+  INVITE
+}
+
 model User {
   id    String  @id @default(uuid())
   email String  @unique
@@ -43,6 +49,7 @@ model User {
   createdHouseholds Household[]      @relation("HouseholdCreator")
   sentInvites       HouseholdInvite[] @relation("InviteSender")
   acceptedInvites   HouseholdInvite[] @relation("InviteAcceptor")
+  validationCodes   ValidationCode[]
   incomeProfiles    MonthlyIncomeProfile[]
   incomeEntries     MonthlyIncomeEntry[]
 
@@ -60,6 +67,7 @@ model Household {
   categories   Category[]
   transactions Transaction[]
   invites      HouseholdInvite[]
+  validationCodes ValidationCode[]
   incomeProfiles MonthlyIncomeProfile[]
   incomeEntries  MonthlyIncomeEntry[]
 
@@ -100,6 +108,28 @@ model HouseholdInvite {
   createdAt DateTime @default(now())
 
   @@index([householdId, expiresAt])
+}
+
+model ValidationCode {
+  id          String             @id @default(uuid())
+  type        ValidationCodeType
+  email       String
+  code        String
+  userId      String?
+  householdId String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  household Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([type, code])
+  @@index([email, type])
+  @@index([userId])
+  @@index([householdId])
+  @@index([expiresAt])
 }
 
 model Category {

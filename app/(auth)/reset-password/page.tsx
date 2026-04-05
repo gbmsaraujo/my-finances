@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { updateCurrentUserPassword } from '@/app/actions/auth';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,12 @@ import { Input } from '@/components/ui/input';
 
 export default function ResetPasswordPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const code = searchParams.get('code') ?? '';
+    const email = searchParams.get('email') ?? '';
 
     async function handleSubmit(event: FormEvent) {
         event.preventDefault();
@@ -25,7 +28,11 @@ export default function ResetPasswordPage() {
                 return;
             }
 
-            const result = await updateCurrentUserPassword(password);
+            const result = await updateCurrentUserPassword(
+                password,
+                code || undefined,
+                email || undefined,
+            );
 
             if (!result.success) {
                 toast.error(
@@ -53,7 +60,9 @@ export default function ResetPasswordPage() {
                     Redefinir senha
                 </h1>
                 <p className='text-sm text-slate-600'>
-                    Digite sua nova senha para concluir a recuperação.
+                    {code && email
+                        ? 'Digite sua nova senha para concluir a recuperação.'
+                        : 'Digite sua nova senha para alterar a senha da conta autenticada.'}
                 </p>
 
                 <form className='space-y-3' onSubmit={handleSubmit}>

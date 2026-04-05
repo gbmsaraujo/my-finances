@@ -1,8 +1,15 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalizeInviteCode } from "@/lib/utils";
+import {
+    consumeValidationCode,
+    createValidationCode,
+    findActiveValidationCode,
+} from "@/lib/validation-codes";
+import { sendVerificationEmail } from "@/lib/verification-email";
 import { syncUserProfile } from "@/lib/user-profile";
 
 interface ActionResponse<T> {
@@ -14,7 +21,8 @@ interface ActionResponse<T> {
     | "RATE_LIMITED"
     | "INVALID_CREDENTIALS"
     | "EMAIL_NOT_CONFIRMED"
-    | "EMAIL_ALREADY_EXISTS";
+    | "EMAIL_ALREADY_EXISTS"
+    | "INVALID_OR_EXPIRED_CODE";
     retryAfterSeconds?: number;
 }
 
@@ -59,18 +67,16 @@ async function ensurePasswordUser(params: {
 }): Promise<
     ActionResponse<{
         userId: string;
-        emailConfirmationRequired: boolean;
     }>
 > {
-    const supabase = createSupabaseServerClient();
+    const supabaseAdmin = createSupabaseAdminClient();
 
-    const { error, data } = await supabase.auth.signUp({
+    const { error, data } = await supabaseAdmin.auth.admin.createUser({
         email: params.email,
         password: params.password,
-        options: {
-            data: {
-                name: params.name,
-            },
+        email_confirm: true,
+        user_metadata: {
+            name: params.name,
         },
     });
 
@@ -89,7 +95,15 @@ async function ensurePasswordUser(params: {
         };
     }
 
-    if (!data.user) {
+    if (!data.user && !params.allowExisting) {
+        return {
+            success: false,
+            error: "Não foi possível criar a conta",
+        };
+    }
+
+    if (data.user) {
+        const supabase = createSupabaseServerClient();
         const signInResult = await supabase.auth.signInWithPassword({
             email: params.email,
             password: params.password,
@@ -108,26 +122,29 @@ async function ensurePasswordUser(params: {
             success: true,
             data: {
                 userId: signInResult.data.user.id,
-                emailConfirmationRequired: false,
             },
         };
     }
 
-    if (!data.session) {
+    const supabase = createSupabaseServerClient();
+    const signInResult = await supabase.auth.signInWithPassword({
+        email: params.email,
+        password: params.password,
+    });
+
+    if (signInResult.error || !signInResult.data.user) {
         return {
-            success: true,
-            data: {
-                userId: data.user.id,
-                emailConfirmationRequired: true,
-            },
+            success: false,
+            ...mapPasswordAuthError(
+                signInResult.error?.message ?? "Não foi possível autenticar",
+            ),
         };
     }
 
     return {
         success: true,
         data: {
-            userId: data.user.id,
-            emailConfirmationRequired: false,
+            userId: signInResult.data.user.id,
         },
     };
 }
@@ -191,7 +208,7 @@ export async function signUpWithPassword(
     email: string,
     password: string,
     name: string,
-): Promise<ActionResponse<{ needsOnboarding: boolean; emailConfirmationRequired: boolean }>> {
+): Promise<ActionResponse<{ needsOnboarding: boolean }>> {
     try {
         const normalizedEmail = email.trim().toLowerCase();
         const trimmedName = name.trim();
@@ -236,8 +253,6 @@ export async function signUpWithPassword(
             success: true,
             data: {
                 needsOnboarding: true,
-                emailConfirmationRequired:
-                    ensuredUser.data.emailConfirmationRequired,
             }
         };
     } catch (error) {
@@ -263,17 +278,17 @@ export async function registerInvitedUserWithPassword(
             return { success: false, error: "Código de convite inválido" };
         }
 
-        const invite = await prisma.householdInvite.findFirst({
-            where: {
-                code,
-                acceptedAt: null,
-                expiresAt: {
-                    gt: new Date()
-                }
-            }
+        const invite = await findActiveValidationCode({
+            type: "INVITE",
+            code,
+            email: normalizedEmail,
         });
 
         if (!invite) {
+            return { success: false, error: "Convite inválido ou expirado" };
+        }
+
+        if (!invite.householdId) {
             return { success: false, error: "Convite inválido ou expirado" };
         }
 
@@ -317,20 +332,17 @@ export async function registerInvitedUserWithPassword(
             }
         });
 
-        await prisma.householdInvite.update({
-            where: { id: invite.id },
-            data: {
-                acceptedAt: new Date(),
-                acceptedByUser: userId,
-            }
+        await consumeValidationCode({
+            type: "INVITE",
+            code,
+            email: normalizedEmail,
         });
 
         return {
             success: true,
             data: {
                 householdId: invite.householdId,
-                emailConfirmationRequired:
-                    ensuredUser.data.emailConfirmationRequired,
+                emailConfirmationRequired: false,
             }
         };
     } catch (error) {
@@ -349,20 +361,21 @@ export async function getInvitePreview(codeInput: string): Promise<ActionRespons
             return { success: false, error: "Código inválido" };
         }
 
-        const invite = await prisma.householdInvite.findFirst({
+        const invite = await prisma.validationCode.findFirst({
             where: {
+                type: "INVITE",
                 code,
-                acceptedAt: null,
+                usedAt: null,
                 expiresAt: {
                     gt: new Date(),
-                }
+                },
             },
             include: {
                 household: true,
             }
         });
 
-        if (!invite) {
+        if (!invite || !invite.household) {
             return { success: false, error: "Convite inválido ou expirado" };
         }
 
@@ -401,13 +414,6 @@ export async function signOut(): Promise<ActionResponse<null>> {
     }
 }
 
-function getAppUrl() {
-    return (
-        process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
-        "http://localhost:3000"
-    );
-}
-
 export async function requestPasswordReset(
     email: string,
 ): Promise<ActionResponse<null>> {
@@ -426,18 +432,37 @@ export async function requestPasswordReset(
             };
         }
 
-        const supabase = createSupabaseServerClient();
-        const redirectTo = `${getAppUrl()}/auth/verify?next=/reset-password`;
+        const validationCode = await createValidationCode({
+            type: "FORGOT_PASSWORD",
+            email: normalizedEmail,
+        });
 
-        const { error } = await supabase.auth.resetPasswordForEmail(
-            normalizedEmail,
-            { redirectTo },
-        );
+        const emailResult = await sendVerificationEmail({
+            type: "forgot-password",
+            to: normalizedEmail,
+            code: validationCode.code,
+            expiresAtIso: validationCode.expiresAt.toISOString(),
+        });
 
-        if (error) {
+        if (!emailResult.sent) {
+            await prisma.validationCode.delete({
+                where: { id: validationCode.id },
+            });
+
+            if (emailResult.reason === "missing_env") {
+                return {
+                    success: false,
+                    error:
+                        emailResult.message ||
+                        "Configuração de email ausente. Defina RESEND_API_KEY e RESET_FROM_EMAIL.",
+                };
+            }
+
             return {
                 success: false,
-                ...mapPasswordAuthError(error.message),
+                error:
+                    emailResult.message ||
+                    "Falha ao enviar email de redefinição. Tente novamente em instantes.",
             };
         }
 
@@ -455,8 +480,69 @@ export async function requestPasswordReset(
 
 export async function updateCurrentUserPassword(
     newPassword: string,
+    codeInput?: string,
+    email?: string,
 ): Promise<ActionResponse<null>> {
     try {
+        if (codeInput && email) {
+            const normalizedEmail = email.trim().toLowerCase();
+            const code = normalizeInviteCode(codeInput);
+
+            if (code.length !== 6) {
+                return {
+                    success: false,
+                    code: "INVALID_OR_EXPIRED_CODE",
+                    error: "Código inválido ou expirado. Solicite um novo link.",
+                };
+            }
+
+            const validationCode = await findActiveValidationCode({
+                type: "FORGOT_PASSWORD",
+                code,
+                email: normalizedEmail,
+            });
+
+            if (!validationCode) {
+                return {
+                    success: false,
+                    code: "INVALID_OR_EXPIRED_CODE",
+                    error: "Código inválido ou expirado. Solicite um novo link.",
+                };
+            }
+
+            const user = await prisma.user.findUnique({
+                where: { email: normalizedEmail },
+            });
+
+            if (!user) {
+                return {
+                    success: false,
+                    code: "USER_NOT_FOUND",
+                    error: "Email não cadastrado.",
+                };
+            }
+
+            const supabaseAdmin = createSupabaseAdminClient();
+            const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+                password: newPassword,
+            });
+
+            if (error) {
+                return {
+                    success: false,
+                    ...mapPasswordAuthError(error.message),
+                };
+            }
+
+            await consumeValidationCode({
+                type: "FORGOT_PASSWORD",
+                code,
+                email: normalizedEmail,
+            });
+
+            return { success: true };
+        }
+
         const supabase = createSupabaseServerClient();
 
         const {
