@@ -2,7 +2,6 @@ import { sendResendEmail } from "@/lib/email";
 import { getVerificationFlowConfig, VerificationFlowType } from "@/lib/verification-flow";
 import {
     buildValidationCodeLink,
-    ValidationCodeType,
 } from "@/lib/validation-codes";
 
 type VerificationEmailContext = {
@@ -73,10 +72,6 @@ function getFooter(params: VerificationEmailContext) {
     return "Se você não criou a conta, ignore esta mensagem.";
 }
 
-function toValidationCodeType(type: VerificationFlowType): ValidationCodeType {
-    return getVerificationFlowConfig(type).validationCodeType;
-}
-
 function buildVerificationLink(params: VerificationEmailContext) {
     const flowConfig = getVerificationFlowConfig(params.type);
 
@@ -84,7 +79,7 @@ function buildVerificationLink(params: VerificationEmailContext) {
         path: "/auth/verify",
         code: params.code,
         email: params.to,
-        type: toValidationCodeType(params.type),
+        type: params.type,
         next: flowConfig.defaultNextPath,
     });
 }

@@ -99,13 +99,13 @@ export function buildValidationCodeLink(params: {
     path: string;
     code: string;
     email: string;
-    type: ValidationCodeType;
+    type: ValidationCodeType | string;
     next?: string;
 }) {
     const url = new URL(params.path, getAppUrl());
     url.searchParams.set("code", params.code);
     url.searchParams.set("email", params.email);
-    url.searchParams.set("type", params.type.toLowerCase());
+    url.searchParams.set("type", params.type.toLowerCase().replace("_", "-"));
 
     if (params.next) {
         url.searchParams.set("next", params.next);
