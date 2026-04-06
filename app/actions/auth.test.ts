@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
 
     const supabaseClient = {
         auth: {
+            signUp: vi.fn(),
             signInWithPassword: vi.fn(),
             getUser: vi.fn(),
             signOut: vi.fn(),
@@ -82,6 +83,14 @@ describe("auth actions - fluxo simples", () => {
                     id: "user-auth",
                     email: "user@teste.com",
                     user_metadata: { name: "User" },
+                },
+            },
+        });
+        mocks.supabaseClient.auth.signUp.mockResolvedValue({
+            error: null,
+            data: {
+                user: {
+                    id: "user-auth",
                 },
             },
         });
@@ -230,6 +239,47 @@ describe("auth actions - fluxo simples", () => {
 
         expect(result.success).toBe(true);
         expect(result.data?.householdId).toBe("house-1");
+        expect(mocks.prisma.validationCode.update).toHaveBeenCalled();
+    });
+
+    it("registerInvitedUserWithPassword usa fallback sem service role key", async () => {
+        mocks.prisma.validationCode.findUnique.mockResolvedValue({
+            id: "invite-1",
+            householdId: "house-1",
+            email: "convite@teste.com",
+            code: "123456",
+            expiresAt: new Date(Date.now() + 300000),
+        });
+        mocks.createSupabaseAdminClient.mockImplementation(() => {
+            throw new Error("SUPABASE_SERVICE_ROLE_KEY não definida");
+        });
+        mocks.supabaseClient.auth.signUp.mockResolvedValue({
+            error: null,
+            data: {
+                user: {
+                    id: "user-auth",
+                },
+            },
+        });
+        mocks.prisma.user.upsert.mockResolvedValue({ id: "user-auth" });
+        mocks.prisma.householdMember.upsert.mockResolvedValue({});
+        mocks.prisma.validationCode.update.mockResolvedValue({});
+
+        const result = await registerInvitedUserWithPassword(
+            "123456",
+            "convite@teste.com",
+            "123456",
+            "Convidado",
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.data?.householdId).toBe("house-1");
+        expect(mocks.supabaseClient.auth.signUp).toHaveBeenCalledWith(
+            expect.objectContaining({
+                email: "convite@teste.com",
+                password: "123456",
+            }),
+        );
         expect(mocks.prisma.validationCode.update).toHaveBeenCalled();
     });
 

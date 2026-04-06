@@ -69,64 +69,82 @@ async function ensurePasswordUser(params: {
         userId: string;
     }>
 > {
-    const supabaseAdmin = createSupabaseAdminClient();
+    const supabase = createSupabaseServerClient();
 
-    const { error, data } = await supabaseAdmin.auth.admin.createUser({
-        email: params.email,
-        password: params.password,
-        email_confirm: true,
-        user_metadata: {
-            name: params.name,
-        },
-    });
+    try {
+        const supabaseAdmin = createSupabaseAdminClient();
 
-    if (error && !isUserAlreadyRegisteredError(error.message)) {
-        return {
-            success: false,
-            ...mapPasswordAuthError(error.message),
-        };
-    }
-
-    if (error && isUserAlreadyRegisteredError(error.message) && !params.allowExisting) {
-        return {
-            success: false,
-            code: "EMAIL_ALREADY_EXISTS",
-            error: "Email já cadastrado.",
-        };
-    }
-
-    if (!data.user && !params.allowExisting) {
-        return {
-            success: false,
-            error: "Não foi possível criar a conta",
-        };
-    }
-
-    if (data.user) {
-        const supabase = createSupabaseServerClient();
-        const signInResult = await supabase.auth.signInWithPassword({
+        const { error, data } = await supabaseAdmin.auth.admin.createUser({
             email: params.email,
             password: params.password,
+            email_confirm: true,
+            user_metadata: {
+                name: params.name,
+            },
         });
 
-        if (signInResult.error || !signInResult.data.user) {
+        if (error && !isUserAlreadyRegisteredError(error.message)) {
             return {
                 success: false,
-                ...mapPasswordAuthError(
-                    signInResult.error?.message ?? "Não foi possível autenticar",
-                ),
+                ...mapPasswordAuthError(error.message),
             };
         }
 
-        return {
-            success: true,
-            data: {
-                userId: signInResult.data.user.id,
+        if (
+            error &&
+            isUserAlreadyRegisteredError(error.message) &&
+            !params.allowExisting
+        ) {
+            return {
+                success: false,
+                code: "EMAIL_ALREADY_EXISTS",
+                error: "Email já cadastrado.",
+            };
+        }
+
+        if (!data.user && !params.allowExisting) {
+            return {
+                success: false,
+                error: "Não foi possível criar a conta",
+            };
+        }
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "";
+
+        if (!/SUPABASE_SERVICE_ROLE_KEY/i.test(errorMessage)) {
+            throw error;
+        }
+
+        const { error: signUpError } = await supabase.auth.signUp({
+            email: params.email,
+            password: params.password,
+            options: {
+                data: {
+                    name: params.name,
+                },
             },
-        };
+        });
+
+        if (signUpError && !isUserAlreadyRegisteredError(signUpError.message)) {
+            return {
+                success: false,
+                ...mapPasswordAuthError(signUpError.message),
+            };
+        }
+
+        if (
+            signUpError &&
+            isUserAlreadyRegisteredError(signUpError.message) &&
+            !params.allowExisting
+        ) {
+            return {
+                success: false,
+                code: "EMAIL_ALREADY_EXISTS",
+                error: "Email já cadastrado.",
+            };
+        }
     }
 
-    const supabase = createSupabaseServerClient();
     const signInResult = await supabase.auth.signInWithPassword({
         email: params.email,
         password: params.password,
