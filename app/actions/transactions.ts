@@ -13,6 +13,10 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { requireAuthUser } from "@/lib/auth";
 import { DebtType } from "@/types/transaction";
 import {
+    buildInstallmentSchedule,
+    buildMonthlyRecurringSchedule,
+} from "@/lib/installments";
+import {
     parseTransactionStatus,
     TransactionPaymentStatus,
 } from "@/lib/transaction-status";
@@ -49,7 +53,7 @@ async function getCurrentMembership(userId: string) {
  */
 export async function createTransaction(
     input: CreateTransactionInput
-): Promise<ActionResponse<{ id: string }>> {
+): Promise<ActionResponse<{ id: string; installmentGroupId?: string }>> {
     try {
         // 1. Validar input
         const validatedInput = createTransactionSchema.parse(input);
@@ -99,6 +103,112 @@ export async function createTransaction(
         // 4. Converter amount para Decimal
         const amountDecimal = new Decimal(validatedInput.amount.toString());
 
+        const paymentKind = validatedInput.paymentKind;
+
+        if (paymentKind === "INSTALLMENT") {
+            const installmentCount = validatedInput.installmentCount ?? 0;
+            const installmentGroupId = crypto.randomUUID();
+            const schedule = buildInstallmentSchedule({
+                totalAmount: validatedInput.amount,
+                installmentCount,
+                firstDueDate: validatedInput.date,
+            });
+
+            const createdTransactions = await prisma.$transaction(
+                schedule.map((installment) =>
+                    prisma.transaction.create({
+                        data: {
+                            householdId: membership.householdId,
+                            description: validatedInput.description,
+                            amount: new Decimal(installment.amount.toString()),
+                            date: installment.dueDate,
+                            categoryId: validatedInput.categoryId,
+                            userId: auth.userId,
+                            payerId: auth.userId,
+                            isShared,
+                            isPrivate: validatedInput.isPrivate,
+                            paymentKind: "INSTALLMENT",
+                            installmentGroupId,
+                            installmentNumber: installment.installmentNumber,
+                            installmentCount,
+                            installmentTotalAmount: amountDecimal,
+                            quoteValues: schedule.map((item) => ({
+                                installmentNumber: item.installmentNumber,
+                                dueDate: item.dueDate.toISOString(),
+                                amount: item.amount,
+                            })),
+                            debtType,
+                            paymentStatus: "PENDING",
+                            note: validatedInput.note,
+                        } as any,
+                    }),
+                ),
+            );
+
+            revalidatePath("/dashboard");
+            revalidatePath("/expenses/new");
+
+            return {
+                success: true,
+                data: {
+                    id: createdTransactions[0]?.id ?? installmentGroupId,
+                    installmentGroupId,
+                },
+            };
+        }
+
+        if (paymentKind === "FIXED") {
+            const recurringMonths = 120;
+            const installmentGroupId = crypto.randomUUID();
+            const schedule = buildMonthlyRecurringSchedule({
+                amount: validatedInput.amount,
+                firstDueDate: validatedInput.date,
+                months: recurringMonths,
+            });
+
+            const createdTransactions = await prisma.$transaction(
+                schedule.map((item) =>
+                    prisma.transaction.create({
+                        data: {
+                            householdId: membership.householdId,
+                            description: validatedInput.description,
+                            amount: new Decimal(item.amount.toString()),
+                            date: item.dueDate,
+                            categoryId: validatedInput.categoryId,
+                            userId: auth.userId,
+                            payerId: auth.userId,
+                            isShared,
+                            isPrivate: validatedInput.isPrivate,
+                            paymentKind: "FIXED",
+                            installmentGroupId,
+                            installmentNumber: item.installmentNumber,
+                            installmentCount: recurringMonths,
+                            installmentTotalAmount: amountDecimal,
+                            quoteValues: schedule.map((quote) => ({
+                                installmentNumber: quote.installmentNumber,
+                                dueDate: quote.dueDate.toISOString(),
+                                amount: quote.amount,
+                            })),
+                            debtType,
+                            paymentStatus: "PENDING",
+                            note: validatedInput.note,
+                        } as any,
+                    }),
+                ),
+            );
+
+            revalidatePath("/dashboard");
+            revalidatePath("/expenses/new");
+
+            return {
+                success: true,
+                data: {
+                    id: createdTransactions[0]?.id ?? installmentGroupId,
+                    installmentGroupId,
+                },
+            };
+        }
+
         // 5. Criar transação no banco
         const transaction = await prisma.transaction.create({
             data: {
@@ -111,10 +221,11 @@ export async function createTransaction(
                 payerId: auth.userId, // Defaults to current user; will be changed at settlement time via modal
                 isShared,
                 isPrivate: validatedInput.isPrivate,
+                paymentKind,
                 debtType,
                 paymentStatus: "PENDING",
                 note: validatedInput.note,
-            },
+            } as any,
         });
 
         revalidatePath("/dashboard");
@@ -170,6 +281,12 @@ export async function getTransactions(
             payerId: string;
             isShared: boolean;
             isPrivate: boolean;
+            paymentKind: "SINGLE" | "FIXED" | "INSTALLMENT";
+            installmentGroupId: string | null;
+            installmentNumber: number | null;
+            installmentCount: number | null;
+            installmentTotalAmount: number | null;
+            quoteValues: unknown;
             debtType: DebtType;
             paymentStatus: TransactionPaymentStatus;
             note?: string | null;
@@ -228,6 +345,14 @@ export async function getTransactions(
 
         // 5. Converter Decimal para Number
         const formattedTransactions = transactions.map((t) => {
+            const transactionRecord = t as typeof t & {
+                paymentKind?: "SINGLE" | "FIXED" | "INSTALLMENT";
+                installmentGroupId?: string | null;
+                installmentNumber?: number | null;
+                installmentCount?: number | null;
+                installmentTotalAmount?: Decimal | number | null;
+                quoteValues?: unknown;
+            };
             const { status: legacyStatus, note } = parseTransactionStatus(t.note);
             const paymentStatus: TransactionPaymentStatus =
                 t.paymentStatus === "PENDING" && legacyStatus === "PAID"
@@ -245,6 +370,16 @@ export async function getTransactions(
                 payerId: t.payerId,
                 isShared: t.isShared,
                 isPrivate: t.isPrivate,
+                paymentKind: transactionRecord.paymentKind ?? "SINGLE",
+                installmentGroupId: transactionRecord.installmentGroupId ?? null,
+                installmentNumber: transactionRecord.installmentNumber ?? null,
+                installmentCount: transactionRecord.installmentCount ?? null,
+                installmentTotalAmount: transactionRecord.installmentTotalAmount
+                    ? typeof transactionRecord.installmentTotalAmount === "number"
+                        ? transactionRecord.installmentTotalAmount
+                        : transactionRecord.installmentTotalAmount.toNumber()
+                    : null,
+                quoteValues: transactionRecord.quoteValues ?? null,
                 debtType: t.debtType,
                 paymentStatus,
                 note,

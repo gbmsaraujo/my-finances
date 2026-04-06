@@ -9,6 +9,7 @@ import {
 } from '@/lib/validations/transaction';
 import { createTransaction } from '@/app/actions/transactions';
 import { createCategory } from '@/app/actions/category';
+import { buildInstallmentSchedule } from '@/lib/installments';
 import {
     Form,
     FormControl,
@@ -91,6 +92,8 @@ export function TransactionForm({
             amount: 0,
             date: new Date(),
             categoryId: defaultCategoryId,
+            paymentKind: 'SINGLE',
+            installmentCount: undefined,
             debtType: 'SHARED',
             note: '',
             isPrivate: false,
@@ -124,6 +127,8 @@ export function TransactionForm({
                     amount: 0,
                     date: new Date(),
                     categoryId: localCategories[0]?.id ?? '',
+                    paymentKind: 'SINGLE',
+                    installmentCount: undefined,
                     debtType: 'SHARED',
                     note: '',
                     isPrivate: false,
@@ -183,11 +188,32 @@ export function TransactionForm({
     }
 
     const isPrivate = form.watch('isPrivate');
+    const paymentKind = form.watch('paymentKind');
+    const installmentCount = form.watch('installmentCount');
+    const amountValue = form.watch('amount');
+    const dateValue = form.watch('date');
     const debtType = form.watch('debtType');
     const categoryId = form.watch('categoryId');
     const selectedCategoryName =
         localCategories.find((category) => category.id === categoryId)?.name ??
         'Selecione uma categoria';
+
+    const amountLabel =
+        paymentKind === 'INSTALLMENT'
+            ? 'Valor total'
+            : paymentKind === 'FIXED'
+              ? 'Valor mensal'
+              : 'Valor';
+
+    const installmentPreview =
+        paymentKind === 'INSTALLMENT' && installmentCount && amountValue > 0
+            ? buildInstallmentSchedule({
+                  totalAmount: amountValue,
+                  installmentCount,
+                  firstDueDate:
+                      dateValue instanceof Date ? dateValue : new Date(),
+              })
+            : [];
 
     const debtTypeLabelMap: Record<CreateTransactionInput['debtType'], string> =
         {
@@ -231,7 +257,7 @@ export function TransactionForm({
                         render={({ field }) => (
                             <FormItem>
                                 <FormLabel className='text-base font-semibold'>
-                                    Valor
+                                    {amountLabel}
                                 </FormLabel>
                                 <FormControl>
                                     <div className='relative'>
@@ -276,6 +302,128 @@ export function TransactionForm({
                             </FormItem>
                         )}
                     />
+
+                    <FormField
+                        control={form.control}
+                        name='paymentKind'
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel className='text-base font-semibold'>
+                                    Tipo de despesa
+                                </FormLabel>
+                                <Select
+                                    onValueChange={(value) => {
+                                        field.onChange(value);
+                                        if (value !== 'INSTALLMENT') {
+                                            form.setValue(
+                                                'installmentCount',
+                                                undefined,
+                                            );
+                                        }
+                                    }}
+                                    value={field.value}
+                                >
+                                    <FormControl>
+                                        <SelectTrigger className='h-12 text-base rounded-lg'>
+                                            <SelectValue placeholder='Selecione o tipo'>
+                                                {field.value === 'SINGLE'
+                                                    ? 'Única'
+                                                    : field.value === 'FIXED'
+                                                      ? 'Fixa'
+                                                      : 'Parcelada'}
+                                            </SelectValue>
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        <SelectItem value='SINGLE'>
+                                            Única
+                                        </SelectItem>
+                                        <SelectItem value='FIXED'>
+                                            Fixa
+                                        </SelectItem>
+                                        <SelectItem value='INSTALLMENT'>
+                                            Parcelada
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <FormDescription className='text-xs'>
+                                    Única é um lançamento só; fixa aparece como
+                                    conta recorrente; parcelada gera parcelas
+                                    mensais.
+                                </FormDescription>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+
+                    {paymentKind === 'INSTALLMENT' ? (
+                        <FormField
+                            control={form.control}
+                            name='installmentCount'
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel className='text-base font-semibold'>
+                                        Número de parcelas
+                                    </FormLabel>
+                                    <FormControl>
+                                        <Input
+                                            type='number'
+                                            min={2}
+                                            max={60}
+                                            placeholder='Ex: 4'
+                                            className='h-12 text-lg rounded-lg'
+                                            value={field.value ?? ''}
+                                            onChange={(event) =>
+                                                field.onChange(
+                                                    event.target.value
+                                                        ? Number(
+                                                              event.target
+                                                                  .value,
+                                                          )
+                                                        : undefined,
+                                                )
+                                            }
+                                        />
+                                    </FormControl>
+                                    <FormDescription className='text-xs'>
+                                        Exemplo: 4x em maio, junho, julho e
+                                        agosto.
+                                    </FormDescription>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                    ) : null}
+
+                    {installmentPreview.length > 0 ? (
+                        <div className='rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900 space-y-2'>
+                            <p className='font-semibold'>
+                                Preview das parcelas
+                            </p>
+                            <p className='text-xs text-indigo-700'>
+                                A despesa vai aparecer nos meses abaixo até a
+                                última parcela ser paga.
+                            </p>
+                            <div className='space-y-1'>
+                                {installmentPreview.map((item) => (
+                                    <div
+                                        key={item.installmentNumber}
+                                        className='flex items-center justify-between gap-3'
+                                    >
+                                        <span>
+                                            {new Intl.DateTimeFormat('pt-BR', {
+                                                month: 'long',
+                                                year: 'numeric',
+                                            }).format(item.dueDate)}
+                                        </span>
+                                        <span className='font-medium'>
+                                            R$ {item.amount.toFixed(2)}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
 
                     <FormField
                         control={form.control}

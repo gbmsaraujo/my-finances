@@ -79,6 +79,14 @@ export default async function DashboardPage({
     });
 
     const normalizedTransactions = transactions.map((transaction) => {
+        const transactionRecord = transaction as typeof transaction & {
+            paymentKind?: 'SINGLE' | 'FIXED' | 'INSTALLMENT';
+            installmentGroupId?: string | null;
+            installmentNumber?: number | null;
+            installmentCount?: number | null;
+            installmentTotalAmount?: { toNumber: () => number } | number | null;
+            quoteValues?: unknown;
+        };
         const { status: legacyStatus, note } = parseTransactionStatus(
             transaction.note,
         );
@@ -101,6 +109,16 @@ export default async function DashboardPage({
             payerId: transaction.payerId,
             isShared: transaction.isShared,
             isPrivate: transaction.isPrivate,
+            paymentKind: transactionRecord.paymentKind ?? 'SINGLE',
+            installmentGroupId: transactionRecord.installmentGroupId ?? null,
+            installmentNumber: transactionRecord.installmentNumber ?? null,
+            installmentCount: transactionRecord.installmentCount ?? null,
+            installmentTotalAmount: transactionRecord.installmentTotalAmount
+                ? typeof transactionRecord.installmentTotalAmount === 'number'
+                    ? transactionRecord.installmentTotalAmount
+                    : transactionRecord.installmentTotalAmount.toNumber()
+                : null,
+            quoteValues: transactionRecord.quoteValues ?? null,
             debtType: transaction.debtType,
             paymentStatus:
                 dbPaymentStatus === 'PENDING' && legacyStatus === 'PAID'

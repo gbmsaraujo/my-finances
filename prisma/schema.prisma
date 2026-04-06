@@ -28,6 +28,12 @@ enum PaymentStatus {
   PAID
 }
 
+enum TransactionPaymentKind {
+  SINGLE
+  FIXED
+  INSTALLMENT
+}
+
 enum ValidationCodeType {
   SIGNUP
   FORGOT_PASSWORD
@@ -174,6 +180,12 @@ model Transaction {
   // Flags de Lógica
   isShared  Boolean @default(true) // Se true, divide por 2
   isPrivate Boolean @default(false) // Se true, só o dono vê
+  paymentKind TransactionPaymentKind @default(SINGLE)
+  installmentGroupId String?
+  installmentNumber Int?
+  installmentCount Int?
+  installmentTotalAmount Decimal? @db.Decimal(10, 2)
+  quoteValues Json?
   debtType  DebtType @default(SHARED)
   paymentStatus PaymentStatus @default(PENDING)
   note      String?
@@ -186,6 +198,7 @@ model Transaction {
   @@index([isShared])
   @@index([categoryId])
   @@index([payerId])
+  @@index([installmentGroupId])
   @@index([paymentStatus])
 }
 

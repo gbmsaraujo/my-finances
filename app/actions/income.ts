@@ -117,26 +117,46 @@ export async function setMonthlyIncomeForPeriod(
 
         const amount = new Decimal(validatedInput.amount.toString());
 
-        const entry = await incomePrisma.monthlyIncomeEntry.upsert({
-            where: {
-                householdId_userId_month_year: {
+        const [entry] = await Promise.all([
+            incomePrisma.monthlyIncomeEntry.upsert({
+                where: {
+                    householdId_userId_month_year: {
+                        householdId: validatedInput.householdId,
+                        userId: auth.userId,
+                        month: validatedInput.month,
+                        year: validatedInput.year,
+                    },
+                },
+                update: {
+                    amount,
+                },
+                create: {
                     householdId: validatedInput.householdId,
                     userId: auth.userId,
                     month: validatedInput.month,
                     year: validatedInput.year,
+                    amount,
                 },
-            },
-            update: {
-                amount,
-            },
-            create: {
-                householdId: validatedInput.householdId,
-                userId: auth.userId,
-                month: validatedInput.month,
-                year: validatedInput.year,
-                amount,
-            },
-        });
+            }),
+            incomePrisma.monthlyIncomeProfile.upsert({
+                where: {
+                    householdId_userId: {
+                        householdId: validatedInput.householdId,
+                        userId: auth.userId,
+                    },
+                },
+                update: {
+                    defaultAmount: amount,
+                    isActive: true,
+                },
+                create: {
+                    householdId: validatedInput.householdId,
+                    userId: auth.userId,
+                    defaultAmount: amount,
+                    isActive: true,
+                },
+            }),
+        ]);
 
         revalidatePath("/dashboard");
 

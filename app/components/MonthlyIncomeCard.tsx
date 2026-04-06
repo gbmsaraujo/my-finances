@@ -260,9 +260,8 @@ export function MonthlyIncomeCard({
                         </p>
                         <div className='flex gap-2'>
                             <Input
-                                type='number'
-                                min='0'
-                                step='0.01'
+                                type='text'
+                                inputMode='decimal'
                                 placeholder='Ex: 4500'
                                 value={monthAmount}
                                 onChange={(e) => setMonthAmount(e.target.value)}
@@ -296,9 +295,8 @@ export function MonthlyIncomeCard({
                         </p>
                         <div className='flex gap-2'>
                             <Input
-                                type='number'
-                                min='0'
-                                step='0.01'
+                                type='text'
+                                inputMode='decimal'
                                 placeholder='Ex: 4500'
                                 value={defaultAmount}
                                 onChange={(e) =>
@@ -328,9 +326,8 @@ export function MonthlyIncomeCard({
                         <p className='text-sm font-medium'>Renda Extra</p>
                         <div className='flex gap-2'>
                             <Input
-                                type='number'
-                                min='0'
-                                step='0.01'
+                                type='text'
+                                inputMode='decimal'
                                 placeholder='Ex: 800'
                                 value={extraAmount}
                                 onChange={(e) => setExtraAmount(e.target.value)}

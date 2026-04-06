@@ -38,6 +38,12 @@ interface Transaction {
     payerId: string;
     isShared: boolean;
     isPrivate: boolean;
+    paymentKind: 'SINGLE' | 'FIXED' | 'INSTALLMENT';
+    installmentGroupId: string | null;
+    installmentNumber: number | null;
+    installmentCount: number | null;
+    installmentTotalAmount: number | null;
+    quoteValues: unknown;
     debtType: 'SHARED' | 'INDIVIDUAL' | 'LOAN';
     paymentStatus: 'PENDING' | 'PAID';
     note?: string | null;
@@ -228,22 +234,6 @@ export function TransactionsList({
         );
     }
 
-    if (localTransactions.length === 0) {
-        return (
-            <Card>
-                <CardContent className='pt-12 pb-12 text-center'>
-                    <div className='text-4xl mb-3'>📊</div>
-                    <p className='text-gray-600 dark:text-gray-400 font-medium'>
-                        Nenhuma despesa registrada ainda
-                    </p>
-                    <p className='text-sm text-gray-500 dark:text-gray-500 mt-2'>
-                        Comece a adicionar gastos para ver o resumo do mês
-                    </p>
-                </CardContent>
-            </Card>
-        );
-    }
-
     return (
         <>
             <Card>
@@ -386,9 +376,16 @@ export function TransactionsList({
                                 ))}
                             </div>
                         ) : statusFilteredTransactions.length === 0 ? (
-                            <p className='text-center text-gray-500 dark:text-gray-400 py-4'>
-                                Nenhuma transação para os filtros selecionados
-                            </p>
+                            <div className='pt-12 pb-12 text-center'>
+                                <div className='text-4xl mb-3'>📊</div>
+                                <p className='text-gray-600 dark:text-gray-400 font-medium'>
+                                    Nenhuma despesa registrada ainda
+                                </p>
+                                <p className='text-sm text-gray-500 dark:text-gray-500 mt-2'>
+                                    Comece a adicionar gastos para ver o resumo
+                                    do mês
+                                </p>
+                            </div>
                         ) : (
                             statusFilteredTransactions.map((transaction) => (
                                 <TransactionItem
@@ -454,6 +451,15 @@ function TransactionItem({
               ? 'Empréstimo'
               : 'Individual';
 
+    const paymentKindLabel =
+        transaction.paymentKind === 'FIXED'
+            ? 'Fixa'
+            : transaction.paymentKind === 'INSTALLMENT'
+              ? transaction.installmentCount && transaction.installmentNumber
+                  ? `${transaction.installmentNumber}/${transaction.installmentCount}`
+                  : 'Parcelada'
+              : 'Única';
+
     return (
         <div className='flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border border-gray-100 dark:border-gray-700'>
             <div
@@ -486,6 +492,9 @@ function TransactionItem({
                             {transaction.paymentStatus === 'PAID'
                                 ? 'Pago'
                                 : 'Pendente'}
+                        </Badge>
+                        <Badge variant='secondary' className='text-xs'>
+                            {paymentKindLabel}
                         </Badge>
                         {transaction.isPrivate && (
                             <Badge

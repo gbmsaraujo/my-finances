@@ -10,7 +10,37 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { TrendingDown, TrendingUp, Scale } from 'lucide-react';
+import {
+    Bookmark,
+    Car,
+    Circle,
+    Gamepad2,
+    House,
+    LucideIcon,
+    Scale,
+    TrendingDown,
+    TrendingUp,
+    UtensilsCrossed,
+} from 'lucide-react';
+
+function getCategoryIcon(icon?: string): LucideIcon | null {
+    switch (icon) {
+        case 'house':
+            return House;
+        case 'utensils':
+            return UtensilsCrossed;
+        case 'car':
+            return Car;
+        case 'gamepad-2':
+            return Gamepad2;
+        case 'bookmark':
+            return Bookmark;
+        case 'circle':
+            return Circle;
+        default:
+            return null;
+    }
+}
 
 interface SettlementCardProps {
     settlement: SettlementDetails | null;
@@ -190,15 +220,14 @@ export function CategoryBreakdown({
                 {categories.map((category, idx) => {
                     const percentage =
                         total > 0 ? (category.total / total) * 100 : 0;
+                    const CategoryIcon = getCategoryIcon(category.icon);
 
                     return (
                         <div key={idx} className='space-y-1'>
                             <div className='flex items-center justify-between'>
-                                <span className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                                    {category.icon && (
-                                        <span className='mr-2'>
-                                            {category.icon}
-                                        </span>
+                                <span className='flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                                    {CategoryIcon && (
+                                        <CategoryIcon className='h-4 w-4 shrink-0' />
                                     )}
                                     {category.name}
                                 </span>
